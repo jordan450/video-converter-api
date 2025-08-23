@@ -1,0 +1,355 @@
+// server.js - Complete Video Conversion API
+const express = require('express');
+const multer = require('multer');
+const ffmpeg = require('fluent-ffmpeg');
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs').promises;
+const { v4: uuidv4 } = require('uuid');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// Middleware
+app.use(cors());
+app.use(express.json());
+app.use('/downloads', express.static('outputs'));
+
+// Ensure directories exist
+const ensureDirectories = async () => {
+  try {
+    await fs.mkdir('uploads', { recursive: true });
+    await fs.mkdir('outputs', { recursive: true });
+  } catch (error) {
+    console.log('Directories already exist');
+  }
+};
+
+// File upload configuration
+const storage = multer.diskStorage({
+  destination: 'uploads/',
+  filename: (req, file, cb) => {
+    cb(null, `${uuidv4()}-${file.originalname}`);
+  }
+});
+
+const upload = multer({ 
+  storage,
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('video/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only video files allowed'));
+    }
+  }
+});
+
+// Social media platform presets
+const PRESETS = {
+  instagram_square: {
+    name: 'Instagram Square',
+    resolution: '1080x1080',
+    aspectRatio: '1:1',
+    codec: 'libx264',
+    crf: 23,
+    maxDuration: 60
+  },
+  instagram_story: {
+    name: 'Instagram Story',
+    resolution: '1080x1920',
+    aspectRatio: '9:16', 
+    codec: 'libx264',
+    crf: 23,
+    maxDuration: 15
+  },
+  tiktok: {
+    name: 'TikTok',
+    resolution: '1080x1920',
+    aspectRatio: '9:16',
+    codec: 'libx264',
+    crf: 23,
+    maxDuration: 180
+  },
+  youtube: {
+    name: 'YouTube',
+    resolution: '1920x1080',
+    aspectRatio: '16:9',
+    codec: 'libx264', 
+    crf: 20,
+    maxDuration: null
+  },
+  facebook: {
+    name: 'Facebook',
+    resolution: '1280x720',
+    aspectRatio: '16:9',
+    codec: 'libx264',
+    crf: 23,
+    maxDuration: 240
+  },
+  twitter: {
+    name: 'Twitter/X',
+    resolution: '1280x720', 
+    aspectRatio: '16:9',
+    codec: 'libx264',
+    crf: 23,
+    maxDuration: 140
+  }
+};
+
+// Job tracking (in production, use Redis or database)
+const jobs = new Map();
+
+// API Routes
+
+// Get available presets
+app.get('/api/presets', (req, res) => {
+  const presets = Object.entries(PRESETS).map(([key, preset]) => ({
+    id: key,
+    name: preset.name,
+    resolution: preset.resolution,
+    aspectRatio: preset.aspectRatio,
+    maxDuration: preset.maxDuration
+  }));
+  
+  res.json({ presets });
+});
+
+// Upload and start conversion
+app.post('/api/convert', upload.single('video'), async (req, res) => {
+  try {
+    const jobId = uuidv4();
+    const { platforms } = req.body;
+    
+    if (!req.file) {
+      return res.status(400).json({ error: 'No video file provided' });
+    }
+    
+    if (!platforms) {
+      return res.status(400).json({ error: 'No platforms specified' });
+    }
+    
+    const platformList = JSON.parse(platforms);
+    
+    // Initialize job
+    jobs.set(jobId, {
+      id: jobId,
+      status: 'processing',
+      progress: 0,
+      platforms: platformList,
+      results: [],
+      error: null,
+      createdAt: new Date(),
+      originalFile: req.file.originalname
+    });
+    
+    // Start conversion asynchronously
+    processVideo(req.file, platformList, jobId);
+    
+    res.json({ 
+      jobId, 
+      status: 'processing',
+      message: 'Conversion started',
+      platforms: platformList
+    });
+    
+  } catch (error) {
+    console.error('Conversion error:', error);
+    res.status(500).json({ error: 'Conversion failed' });
+  }
+});
+
+// Get job status
+app.get('/api/jobs/:jobId', (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+  
+  res.json(job);
+});
+
+// Download converted file
+app.get('/api/download/:filename', async (req, res) => {
+  const filename = req.params.filename;
+  const filepath = path.join(__dirname, 'outputs', filename);
+  
+  try {
+    await fs.access(filepath);
+    res.download(filepath, filename);
+  } catch (error) {
+    res.status(404).json({ error: 'File not found' });
+  }
+});
+
+// Health check
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    activeJobs: jobs.size 
+  });
+});
+
+// Video processing function
+const processVideo = async (file, platforms, jobId) => {
+  const job = jobs.get(jobId);
+  const results = [];
+  let completedPlatforms = 0;
+  
+  try {
+    for (const platformId of platforms) {
+      const preset = PRESETS[platformId];
+      
+      if (!preset) {
+        console.error(`Unknown platform: ${platformId}`);
+        continue;
+      }
+      
+      const outputFilename = `${jobId}_${platformId}.mp4`;
+      const outputPath = path.join('outputs', outputFilename);
+      
+      await new Promise((resolve, reject) => {
+        let command = ffmpeg(file.path)
+          .videoCodec(preset.codec)
+          .outputOptions([
+            `-crf ${preset.crf}`,
+            '-preset medium',
+            '-movflags +faststart' // Optimize for web streaming
+          ]);
+        
+        // Handle aspect ratio conversion
+        if (preset.aspectRatio === '1:1') {
+          // Square format - crop to center square
+          command = command.videoFilters([
+            'scale=min(iw\\,ih):min(iw\\,ih)',
+            'crop=min(iw\\,ih):min(iw\\,ih)',
+            `scale=${preset.resolution.split('x')[0]}:${preset.resolution.split('x')[1]}`
+          ]);
+        } else if (preset.aspectRatio === '9:16') {
+          // Portrait format
+          command = command.videoFilters([
+            `scale=${preset.resolution}:force_original_aspect_ratio=decrease`,
+            `pad=${preset.resolution}:(ow-iw)/2:(oh-ih)/2:black`
+          ]);
+        } else {
+          // Landscape format  
+          command = command.videoFilters([
+            `scale=${preset.resolution}:force_original_aspect_ratio=decrease`,
+            `pad=${preset.resolution}:(ow-iw)/2:(oh-ih)/2:black`
+          ]);
+        }
+        
+        // Apply duration limit if specified
+        if (preset.maxDuration) {
+          command = command.duration(preset.maxDuration);
+        }
+        
+        command
+          .output(outputPath)
+          .on('progress', (progress) => {
+            const overallProgress = ((completedPlatforms + (progress.percent / 100)) / platforms.length) * 100;
+            job.progress = Math.round(overallProgress);
+            console.log(`Job ${jobId}: ${overallProgress.toFixed(1)}%`);
+          })
+          .on('end', () => {
+            console.log(`Completed conversion for ${platformId}`);
+            results.push({
+              platform: platformId,
+              platformName: preset.name,
+              filename: outputFilename,
+              downloadUrl: `/api/download/${outputFilename}`
+            });
+            completedPlatforms++;
+            resolve();
+          })
+          .on('error', (error) => {
+            console.error(`Error converting for ${platformId}:`, error);
+            reject(error);
+          })
+          .run();
+      });
+    }
+    
+    // Update job status
+    job.status = 'completed';
+    job.progress = 100;
+    job.results = results;
+    job.completedAt = new Date();
+    
+    console.log(`Job ${jobId} completed successfully`);
+    
+  } catch (error) {
+    console.error(`Job ${jobId} failed:`, error);
+    job.status = 'failed';
+    job.error = error.message;
+    job.failedAt = new Date();
+  } finally {
+    // Cleanup input file
+    try {
+      await fs.unlink(file.path);
+    } catch (error) {
+      console.log('Could not delete input file:', error);
+    }
+  }
+};
+
+// Cleanup old files and jobs (runs every hour)
+const cleanup = async () => {
+  const ONE_DAY = 24 * 60 * 60 * 1000;
+  const now = Date.now();
+  
+  // Clean up old jobs
+  for (const [jobId, job] of jobs.entries()) {
+    if (now - job.createdAt.getTime() > ONE_DAY) {
+      jobs.delete(jobId);
+    }
+  }
+  
+  // Clean up old output files
+  try {
+    const files = await fs.readdir('outputs');
+    for (const file of files) {
+      const filepath = path.join('outputs', file);
+      const stats = await fs.stat(filepath);
+      
+      if (now - stats.mtime.getTime() > ONE_DAY) {
+        await fs.unlink(filepath);
+        console.log(`Deleted old file: ${file}`);
+      }
+    }
+  } catch (error) {
+    console.log('Cleanup error:', error);
+  }
+};
+
+// Start cleanup interval
+setInterval(cleanup, 60 * 60 * 1000); // Every hour
+
+// Error handling
+app.use((error, req, res, next) => {
+  if (error instanceof multer.MulterError) {
+    if (error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({ error: 'File too large. Maximum size is 500MB.' });
+    }
+  }
+  
+  console.error('Unhandled error:', error);
+  res.status(500).json({ error: 'Internal server error' });
+});
+
+// Initialize and start server
+const startServer = async () => {
+  await ensureDirectories();
+  
+  app.listen(PORT, () => {
+    console.log(`🚀 Video Converter API running on port ${PORT}`);
+    console.log(`📁 Upload directory: uploads/`);
+    console.log(`📁 Output directory: outputs/`);
+    console.log(`🎥 Supported platforms: ${Object.keys(PRESETS).join(', ')}`);
+  });
+};
+
+startServer().catch(console.error);
