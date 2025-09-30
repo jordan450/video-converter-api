@@ -4,12 +4,32 @@ const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
+const FormData = require('form-data');
+const fetch = require('node-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Middleware
-app.use(cors());
+// Mixpost Configuration
+const MIXPOST_API_KEY = process.env.MIXPOST_API_KEY || 'Hw6yPBAVaIzgRlXuk3DaFTakerItuBCtDjTcz4xe9b65df26';
+const MIXPOST_BASE_URL = process.env.MIXPOST_BASE_URL || 'https://autoposter.typamanagement.com/mixpost/';
+
+// Middleware - CORS Configuration
+app.use(cors({
+  origin: [
+    'https://lovable.dev',
+    'https://*.lovable.dev',
+    'https://*.lovable.app',
+    /\.lovable\.app$/,
+    /\.lovable\.dev$/,
+    'http://localhost:3000',
+    'http://localhost:5173',
+    'https://converter.typamanagement.com'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use(express.json());
 
 // Storage setup
@@ -44,38 +64,33 @@ const upload = multer({
 const jobs = new Map();
 let jobCounter = 0;
 
-// HIGH QUALITY SETTINGS FOR 1080p MIXPOST-READY OUTPUT
+// HIGH QUALITY SETTINGS FOR 1080p
 const HIGH_QUALITY_SETTINGS = {
-  crf: 18,                    // Excellent quality (15-20 = near lossless)
-  preset: 'slow',             // Better compression at high quality
-  videoBitrate: '8M',         // 8 Mbps for high quality 1080p
-  maxBitrate: '10M',          // Maximum bitrate cap
-  bufferSize: '16M',          // Buffer size for rate control
-  audioBitrate: '192k',       // High quality audio
-  audioSampleRate: 48000,     // Professional audio sample rate
-  profile: 'high',            // High profile for better quality
-  level: '4.0',               // Level 4.0 for HD content
-  pixelFormat: 'yuv420p'      // Required for compatibility
+  crf: 18,
+  preset: 'slow',
+  videoBitrate: '8M',
+  maxBitrate: '10M',
+  bufferSize: '16M',
+  audioBitrate: '192k',
+  audioSampleRate: 48000,
+  profile: 'high',
+  level: '4.0',
+  pixelFormat: 'yuv420p'
 };
 
 // High-quality video processing function
 async function processVideoHighQuality(inputPath, outputPath, config) {
   return new Promise((resolve, reject) => {
-    console.log(`🎬 Processing: ${path.basename(outputPath)}`);
-    console.log(`⚙️  Quality: CRF ${HIGH_QUALITY_SETTINGS.crf}, Preset: ${HIGH_QUALITY_SETTINGS.preset}`);
+    console.log(`Processing: ${path.basename(outputPath)}`);
     
     let command = ffmpeg(inputPath);
-    
-    // Build video filters array
     const videoFilters = [];
     
-    // Speed change (if needed)
     if (config.speed && config.speed !== 1) {
       command = command.audioFilters(`atempo=${config.speed}`);
       videoFilters.push(`setpts=${1/config.speed}*PTS`);
     }
     
-    // Color adjustments (subtle for quality)
     if (config.brightness || config.contrast || config.saturation) {
       const eqParams = [];
       if (config.brightness) eqParams.push(`brightness=${config.brightness}`);
@@ -86,7 +101,6 @@ async function processVideoHighQuality(inputPath, outputPath, config) {
       }
     }
     
-    // Geometric transforms
     if (config.scale && config.scale !== 1) {
       videoFilters.push(`scale=iw*${config.scale}:ih*${config.scale}`);
     }
@@ -95,83 +109,63 @@ async function processVideoHighQuality(inputPath, outputPath, config) {
       videoFilters.push('hflip');
     }
     
-    // CRITICAL: Scale to 1080p while maintaining aspect ratio
     videoFilters.push('scale=-2:min(1080\\,ih)');
-    
-    // Ensure even dimensions (required for H.264)
     videoFilters.push('pad=ceil(iw/2)*2:ceil(ih/2)*2');
     
-    // Apply all video filters
     if (videoFilters.length > 0) {
       command = command.videoFilters(videoFilters);
     }
     
-    // Build the high-quality output
     command
       .output(outputPath)
       .videoCodec('libx264')
       .audioCodec('aac')
       .outputOptions([
-        // QUALITY SETTINGS - THIS IS THE KEY TO NO BLURRINESS
         `-crf ${HIGH_QUALITY_SETTINGS.crf}`,
         `-preset ${HIGH_QUALITY_SETTINGS.preset}`,
-        
-        // Bitrate control for consistent quality
         `-b:v ${HIGH_QUALITY_SETTINGS.videoBitrate}`,
         `-maxrate ${HIGH_QUALITY_SETTINGS.maxBitrate}`,
         `-bufsize ${HIGH_QUALITY_SETTINGS.bufferSize}`,
-        
-        // Compatibility settings
         `-pix_fmt ${HIGH_QUALITY_SETTINGS.pixelFormat}`,
         `-profile:v ${HIGH_QUALITY_SETTINGS.profile}`,
         `-level ${HIGH_QUALITY_SETTINGS.level}`,
-        
-        // High quality audio
         `-b:a ${HIGH_QUALITY_SETTINGS.audioBitrate}`,
         `-ar ${HIGH_QUALITY_SETTINGS.audioSampleRate}`,
         '-ac 2',
-        
-        // Streaming optimization
         '-movflags +faststart',
         '-avoid_negative_ts make_zero',
         '-max_muxing_queue_size 1024',
         '-fflags +genpts'
       ])
-      .on('start', (commandLine) => {
-        console.log('📹 FFmpeg command:', commandLine);
-      })
       .on('progress', (progress) => {
         const percent = Math.round(progress.percent || 0);
         if (percent % 10 === 0) {
-          console.log(`⏳ Progress: ${percent}%`);
+          console.log(`Progress: ${percent}%`);
         }
       })
       .on('end', () => {
-        console.log(`✅ Completed: ${path.basename(outputPath)}`);
+        console.log(`Completed: ${path.basename(outputPath)}`);
         resolve();
       })
       .on('error', (error) => {
-        console.error(`❌ Error processing ${path.basename(outputPath)}:`, error.message);
+        console.error(`Error: ${error.message}`);
         reject(error);
       })
       .run();
   });
 }
 
-// Generate subtle variation config (maintains quality)
 function generateConfig(index) {
-  // Very subtle changes to avoid quality degradation
   return {
-    speed: 0.98 + Math.random() * 0.04,        // 98-102% speed (subtle)
-    brightness: -0.02 + Math.random() * 0.04,   // Very subtle brightness
-    contrast: 0.98 + Math.random() * 0.04,      // Very subtle contrast
-    saturation: 0.97 + Math.random() * 0.06,    // Subtle saturation
-    scale: 0.99 + Math.random() * 0.02,         // 99-101% scale (minimal)
-    flip: Math.random() > 0.8                   // 20% chance of flip
+    speed: 0.98 + Math.random() * 0.04,
+    brightness: -0.02 + Math.random() * 0.04,
+    contrast: 0.98 + Math.random() * 0.04,
+    saturation: 0.97 + Math.random() * 0.06,
+    scale: 0.99 + Math.random() * 0.02,
+    flip: Math.random() > 0.8
   };
 }
 
-// Calculate similarity based on config
 function calculateSimilarity(config) {
   let similarity = 100;
   if (Math.abs(config.speed - 1) > 0.02) similarity -= 5;
@@ -188,6 +182,7 @@ app.get('/health', (req, res) => {
     status: 'SUCCESS', 
     message: 'High-Quality 1080p FFmpeg processing ready',
     ffmpeg: 'Available',
+    mixpost: MIXPOST_API_KEY ? 'Configured' : 'Not configured',
     quality: {
       resolution: '1080p',
       crf: HIGH_QUALITY_SETTINGS.crf,
@@ -203,7 +198,7 @@ app.post('/api/video/upload', upload.single('video'), (req, res) => {
     return res.status(400).json({ error: 'No video uploaded' });
   }
   
-  console.log(`📤 Upload received: ${req.file.originalname} (${(req.file.size / (1024 * 1024)).toFixed(2)} MB)`);
+  console.log(`Upload received: ${req.file.originalname}`);
   
   res.json({
     success: true,
@@ -214,10 +209,10 @@ app.post('/api/video/upload', upload.single('video'), (req, res) => {
 });
 
 app.post('/api/video/process', async (req, res) => {
-  const { videoId, variationCount = 5 } = req.body;
+  const { videoId, variationCount = 1 } = req.body;
   const jobId = ++jobCounter;
   
-  console.log(`🚀 Starting job ${jobId}: ${variationCount} variations for video ${videoId}`);
+  console.log(`Starting job ${jobId}: ${variationCount} variations`);
   
   jobs.set(jobId, {
     status: 'active',
@@ -226,7 +221,6 @@ app.post('/api/video/process', async (req, res) => {
     startTime: Date.now()
   });
   
-  // Start processing (non-blocking)
   processVideos(jobId, videoId, variationCount);
   
   res.json({ 
@@ -240,7 +234,6 @@ async function processVideos(jobId, videoId, count) {
   const job = jobs.get(jobId);
   
   try {
-    // Find actual input file
     const files = fs.readdirSync('uploads').filter(f => f.startsWith(videoId));
     if (files.length === 0) {
       throw new Error('Input file not found');
@@ -249,24 +242,22 @@ async function processVideos(jobId, videoId, count) {
     const actualInput = `uploads/${files[0]}`;
     const results = [];
     
-    console.log(`🎬 Processing ${count} variations from: ${files[0]}`);
+    console.log(`Processing ${count} variations from: ${files[0]}`);
     
     for (let i = 0; i < count; i++) {
-      console.log(`\n📹 [${i + 1}/${count}] Generating variation ${i + 1}...`);
+      console.log(`\n[${i + 1}/${count}] Generating variation ${i + 1}...`);
       
       const config = generateConfig(i);
       const outputPath = `processed/${videoId}_variation_${i + 1}.mp4`;
       
-      // Process with high quality settings
       await processVideoHighQuality(actualInput, outputPath, config);
       
-      // Get file size
       const stats = fs.statSync(outputPath);
       const fileSizeMB = (stats.size / (1024 * 1024)).toFixed(2);
       
       results.push({
         id: `${videoId}_variation_${i + 1}`,
-        name: `variation_${i + 1}.mp4`,
+        name: `${videoId}_variation_${i + 1}.mp4`,
         similarity: calculateSimilarity(config),
         downloadUrl: `/api/video/download/${videoId}_variation_${i + 1}`,
         size: `${fileSizeMB} MB`,
@@ -281,10 +272,10 @@ async function processVideos(jobId, videoId, count) {
     job.completedTime = Date.now();
     job.totalTime = ((job.completedTime - job.startTime) / 1000).toFixed(1) + 's';
     
-    console.log(`\n✅ Job ${jobId} completed! Total time: ${job.totalTime}`);
+    console.log(`\nJob ${jobId} completed! Total time: ${job.totalTime}`);
     
   } catch (error) {
-    console.error(`❌ Job ${jobId} failed:`, error.message);
+    console.error(`Job ${jobId} failed:`, error.message);
     job.status = 'failed';
     job.error = error.message;
   }
@@ -309,18 +300,80 @@ app.get('/api/video/download/:videoId', (req, res) => {
   const filePath = `processed/${req.params.videoId}.mp4`;
   
   if (fs.existsSync(filePath)) {
-    console.log(`📥 Download: ${req.params.videoId}.mp4`);
+    console.log(`Download: ${req.params.videoId}.mp4`);
     res.download(filePath);
   } else {
-    console.log(`❌ File not found: ${req.params.videoId}.mp4`);
+    console.log(`File not found: ${req.params.videoId}.mp4`);
     res.status(404).json({ error: 'File not found' });
   }
 });
 
-// Cleanup old files (optional - runs every hour)
+// MIXPOST INTEGRATION ENDPOINT
+app.post('/api/mixpost/upload', async (req, res) => {
+  const { videoFilename, workspaceId } = req.body;
+  
+  console.log(`Mixpost upload request: ${videoFilename} to workspace ${workspaceId}`);
+  
+  if (!MIXPOST_API_KEY || MIXPOST_API_KEY === 'your-api-key-here') {
+    return res.status(500).json({ error: 'Mixpost API key not configured' });
+  }
+  
+  if (!workspaceId) {
+    return res.status(400).json({ error: 'Workspace ID is required' });
+  }
+  
+  try {
+    const videoPath = path.join(__dirname, 'processed', videoFilename);
+    
+    if (!fs.existsSync(videoPath)) {
+      return res.status(404).json({ error: 'Video file not found' });
+    }
+    
+    const formData = new FormData();
+    formData.append('file', fs.createReadStream(videoPath));
+    
+    console.log(`Uploading to Mixpost: ${MIXPOST_BASE_URL}/api/v1/workspaces/${workspaceId}/media`);
+    
+    const response = await fetch(
+      `${MIXPOST_BASE_URL}/api/v1/workspaces/${workspaceId}/media`,
+      {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${MIXPOST_API_KEY}`,
+          ...formData.getHeaders()
+        },
+        body: formData
+      }
+    );
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Mixpost API error:', errorText);
+      throw new Error(`Mixpost API error (${response.status}): ${errorText}`);
+    }
+    
+    const result = await response.json();
+    console.log('Successfully uploaded to Mixpost:', result);
+    
+    res.json({ 
+      success: true, 
+      mediaId: result.id || result.data?.id,
+      message: 'Video uploaded to Mixpost workspace'
+    });
+    
+  } catch (error) {
+    console.error('Mixpost upload error:', error);
+    res.status(500).json({ 
+      error: error.message,
+      details: 'Failed to upload to Mixpost. Please check your workspace ID and try again.'
+    });
+  }
+});
+
+// Cleanup old files
 setInterval(() => {
   const now = Date.now();
-  const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+  const maxAge = 24 * 60 * 60 * 1000;
   
   ['uploads', 'processed'].forEach(dir => {
     fs.readdirSync(dir).forEach(file => {
@@ -328,20 +381,21 @@ setInterval(() => {
       const stats = fs.statSync(filePath);
       if (now - stats.mtimeMs > maxAge) {
         fs.unlinkSync(filePath);
-        console.log(`🗑️  Cleaned up old file: ${file}`);
+        console.log(`Cleaned up old file: ${file}`);
       }
     });
   });
 }, 60 * 60 * 1000);
 
 app.listen(PORT, () => {
-  console.log(`\n🚀 High-Quality Video Converter Server Started`);
-  console.log(`📡 Port: ${PORT}`);
-  console.log(`🎬 Quality Settings:`);
+  console.log(`\nHigh-Quality Video Converter Server Started`);
+  console.log(`Port: ${PORT}`);
+  console.log(`Quality Settings:`);
   console.log(`   - Resolution: 1080p`);
-  console.log(`   - CRF: ${HIGH_QUALITY_SETTINGS.crf} (excellent quality)`);
-  console.log(`   - Preset: ${HIGH_QUALITY_SETTINGS.preset} (best compression)`);
+  console.log(`   - CRF: ${HIGH_QUALITY_SETTINGS.crf}`);
+  console.log(`   - Preset: ${HIGH_QUALITY_SETTINGS.preset}`);
   console.log(`   - Video Bitrate: ${HIGH_QUALITY_SETTINGS.videoBitrate}`);
   console.log(`   - Audio Bitrate: ${HIGH_QUALITY_SETTINGS.audioBitrate}`);
-  console.log(`✅ Ready for Mixpost-compatible conversions!\n`);
+  console.log(`Mixpost Integration: ${MIXPOST_API_KEY ? 'Enabled' : 'Disabled'}`);
+  console.log(`Ready for conversions!\n`);
 });
