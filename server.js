@@ -157,12 +157,12 @@ async function processVideoHighQuality(inputPath, outputPath, config) {
 
 function generateConfig(index) {
   return {
-    speed: 0.98 + Math.random() * 0.04,
-    brightness: -0.02 + Math.random() * 0.04,
-    contrast: 0.98 + Math.random() * 0.04,
-    saturation: 0.97 + Math.random() * 0.06,
-    scale: 0.99 + Math.random() * 0.02,
-    flip: Math.random() > 0.8
+    speed: 1,        // No speed change
+    brightness: 0,   // No brightness change
+    contrast: 1,     // No contrast change
+    saturation: 1,   // No saturation change
+    scale: 1,        // No scaling beyond 1080p conversion
+    flip: false      // No flipping
   };
 }
 
@@ -439,4 +439,5 @@ app.listen(PORT, () => {
   console.log(`Mixpost URL: ${MIXPOST_BASE_URL}`);
   console.log(`========================================\n`);
 });
+
 
