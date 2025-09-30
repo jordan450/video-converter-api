@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 
 // Mixpost Configuration
 const MIXPOST_API_KEY = process.env.MIXPOST_API_KEY || 'Hw6yPBAVaIzgRlXuk3DaFTakerItuBCtDjTcz4xe9b65df26';
-const MIXPOST_BASE_URL = process.env.MIXPOST_BASE_URL || 'https://autoposter.typamanagement.com/mixpost/';
+const MIXPOST_BASE_URL = process.env.MIXPOST_BASE_URL || 'https://autoposter.typamanagement.com/';
 
 // Middleware - CORS Configuration
 app.use(cors({
@@ -399,3 +399,4 @@ app.listen(PORT, () => {
   console.log(`Mixpost Integration: ${MIXPOST_API_KEY ? 'Enabled' : 'Disabled'}`);
   console.log(`Ready for conversions!\n`);
 });
+
