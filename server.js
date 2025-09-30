@@ -11,10 +11,10 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Mixpost Configuration
-const MIXPOST_API_KEY = process.env.MIXPOST_API_KEY || 'Hw6yPBAVaIzgRlXuk3DaFTakerItuBCtDjTcz4xe9b65df26';
-const MIXPOST_BASE_URL = process.env.MIXPOST_BASE_URL || 'https://autoposter.typamanagement.com/';
+const MIXPOST_API_KEY = process.env.MIXPOST_API_KEY || 'your-api-key-here';
+const MIXPOST_BASE_URL = process.env.MIXPOST_BASE_URL || 'https://autoposter.typamanagement.com/mixpost';
 
-// Middleware - CORS Configuration
+// Middleware
 app.use(cors({
   origin: [
     'https://lovable.dev',
@@ -182,7 +182,10 @@ app.get('/health', (req, res) => {
     status: 'SUCCESS', 
     message: 'High-Quality 1080p FFmpeg processing ready',
     ffmpeg: 'Available',
-    mixpost: MIXPOST_API_KEY ? 'Configured' : 'Not configured',
+    mixpost: {
+      configured: MIXPOST_API_KEY !== 'your-api-key-here',
+      baseUrl: MIXPOST_BASE_URL
+    },
     quality: {
       resolution: '1080p',
       crf: HIGH_QUALITY_SETTINGS.crf,
@@ -308,64 +311,100 @@ app.get('/api/video/download/:videoId', (req, res) => {
   }
 });
 
-// MIXPOST INTEGRATION ENDPOINT
+// MIXPOST INTEGRATION ENDPOINT WITH FULL DEBUG LOGGING
 app.post('/api/mixpost/upload', async (req, res) => {
   const { videoFilename, workspaceId } = req.body;
   
-  console.log(`Mixpost upload request: ${videoFilename} to workspace ${workspaceId}`);
+  console.log('\n========== MIXPOST UPLOAD DEBUG ==========');
+  console.log('Timestamp:', new Date().toISOString());
+  console.log('Video filename:', videoFilename);
+  console.log('Workspace ID:', workspaceId);
+  console.log('MIXPOST_BASE_URL:', MIXPOST_BASE_URL);
+  console.log('MIXPOST_API_KEY configured:', MIXPOST_API_KEY !== 'your-api-key-here');
+  console.log('API Key (first 20 chars):', MIXPOST_API_KEY ? MIXPOST_API_KEY.substring(0, 20) + '...' : 'NOT SET');
   
   if (!MIXPOST_API_KEY || MIXPOST_API_KEY === 'your-api-key-here') {
-    return res.status(500).json({ error: 'Mixpost API key not configured' });
+    console.log('ERROR: Mixpost API key not configured');
+    return res.status(500).json({ error: 'Mixpost API key not configured on server' });
   }
   
   if (!workspaceId) {
+    console.log('ERROR: Workspace ID missing');
     return res.status(400).json({ error: 'Workspace ID is required' });
   }
   
   try {
     const videoPath = path.join(__dirname, 'processed', videoFilename);
+    console.log('Video path:', videoPath);
     
     if (!fs.existsSync(videoPath)) {
+      console.log('ERROR: Video file not found at path');
       return res.status(404).json({ error: 'Video file not found' });
     }
+    
+    const fileStats = fs.statSync(videoPath);
+    console.log('Video file size:', (fileStats.size / (1024 * 1024)).toFixed(2), 'MB');
     
     const formData = new FormData();
     formData.append('file', fs.createReadStream(videoPath));
     
-    console.log(`Uploading to Mixpost: ${MIXPOST_BASE_URL}/api/${workspaceId}/media`);
+    // Construct the correct Mixpost URL based on documentation
+    const uploadUrl = `${MIXPOST_BASE_URL}/api/${workspaceId}/media`;
+    console.log('Upload URL:', uploadUrl);
     
-    const response = await fetch(
-      `${MIXPOST_BASE_URL}/api/${workspaceId}/media`,
-      {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${MIXPOST_API_KEY}`,
-          ...formData.getHeaders()
-        },
-        body: formData
-      }
-    );
+    console.log('Making request to Mixpost API...');
+    
+    const response = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${MIXPOST_API_KEY}`,
+        ...formData.getHeaders()
+      },
+      body: formData
+    });
+    
+    console.log('Response status:', response.status);
+    console.log('Response status text:', response.statusText);
+    console.log('Response headers:', JSON.stringify(response.headers.raw(), null, 2));
+    
+    const responseText = await response.text();
+    console.log('Response body (first 500 chars):', responseText.substring(0, 500));
     
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error('Mixpost API error:', errorText);
-      throw new Error(`Mixpost API error (${response.status}): ${errorText}`);
+      console.log('ERROR: Mixpost API returned non-OK status');
+      console.log('Full error response:', responseText);
+      
+      throw new Error(`Mixpost API error (${response.status}): ${responseText.substring(0, 200)}`);
     }
     
-    const result = await response.json();
-    console.log('Successfully uploaded to Mixpost:', result);
+    let result;
+    try {
+      result = JSON.parse(responseText);
+      console.log('Parsed response:', JSON.stringify(result, null, 2));
+    } catch (parseError) {
+      console.log('ERROR: Failed to parse response as JSON');
+      throw new Error('Invalid JSON response from Mixpost');
+    }
+    
+    console.log('SUCCESS: Video uploaded to Mixpost');
+    console.log('Media ID:', result.id || result.uuid);
+    console.log('==========================================\n');
     
     res.json({ 
       success: true, 
-      mediaId: result.id || result.data?.id,
+      mediaId: result.id || result.uuid,
+      mediaUrl: result.url,
       message: 'Video uploaded to Mixpost workspace'
     });
     
   } catch (error) {
-    console.error('Mixpost upload error:', error);
+    console.error('EXCEPTION in Mixpost upload:', error.message);
+    console.error('Stack trace:', error.stack);
+    console.log('==========================================\n');
+    
     res.status(500).json({ 
       error: error.message,
-      details: 'Failed to upload to Mixpost. Please check your workspace ID and try again.'
+      details: 'Check server logs for more information'
     });
   }
 });
@@ -388,17 +427,15 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
 app.listen(PORT, () => {
-  console.log(`\nHigh-Quality Video Converter Server Started`);
+  console.log(`\n========================================`);
+  console.log(`High-Quality Video Converter Server`);
+  console.log(`========================================`);
   console.log(`Port: ${PORT}`);
-  console.log(`Quality Settings:`);
-  console.log(`   - Resolution: 1080p`);
-  console.log(`   - CRF: ${HIGH_QUALITY_SETTINGS.crf}`);
-  console.log(`   - Preset: ${HIGH_QUALITY_SETTINGS.preset}`);
-  console.log(`   - Video Bitrate: ${HIGH_QUALITY_SETTINGS.videoBitrate}`);
-  console.log(`   - Audio Bitrate: ${HIGH_QUALITY_SETTINGS.audioBitrate}`);
-  console.log(`Mixpost Integration: ${MIXPOST_API_KEY ? 'Enabled' : 'Disabled'}`);
-  console.log(`Ready for conversions!\n`);
+  console.log(`Quality: 1080p CRF ${HIGH_QUALITY_SETTINGS.crf}`);
+  console.log(`Preset: ${HIGH_QUALITY_SETTINGS.preset}`);
+  console.log(`Video Bitrate: ${HIGH_QUALITY_SETTINGS.videoBitrate}`);
+  console.log(`Audio Bitrate: ${HIGH_QUALITY_SETTINGS.audioBitrate}`);
+  console.log(`Mixpost: ${MIXPOST_API_KEY !== 'your-api-key-here' ? 'Configured' : 'Not configured'}`);
+  console.log(`Mixpost URL: ${MIXPOST_BASE_URL}`);
+  console.log(`========================================\n`);
 });
-
-
-
