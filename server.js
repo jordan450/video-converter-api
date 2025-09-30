@@ -11,7 +11,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Mixpost Configuration
-const MIXPOST_API_KEY = process.env.MIXPOST_API_KEY || 'your-api-key-here';
+const MIXPOST_API_KEY = process.env.MIXPOST_API_KEY || 'q8tCpIiGu8qe4nQNlq2Hg2TTkYr8SvgAyBYweJVld0ec7391';
 const MIXPOST_BASE_URL = process.env.MIXPOST_BASE_URL || 'https://autoposter.typamanagement.com/mixpost';
 
 // Middleware
@@ -439,3 +439,4 @@ app.listen(PORT, () => {
   console.log(`Mixpost URL: ${MIXPOST_BASE_URL}`);
   console.log(`========================================\n`);
 });
+
