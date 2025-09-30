@@ -332,10 +332,10 @@ app.post('/api/mixpost/upload', async (req, res) => {
     const formData = new FormData();
     formData.append('file', fs.createReadStream(videoPath));
     
-    console.log(`Uploading to Mixpost: ${MIXPOST_BASE_URL}/api/v1/workspaces/${workspaceId}/media`);
+    console.log(`Uploading to Mixpost: ${MIXPOST_BASE_URL}/api/v1/workspace/${workspaceId}/media`);
     
     const response = await fetch(
-      `${MIXPOST_BASE_URL}/api/v1/workspaces/${workspaceId}/media`,
+      `${MIXPOST_BASE_URL}/api/v1/workspace/${workspaceId}/media`,
       {
         method: 'POST',
         headers: {
@@ -399,4 +399,5 @@ app.listen(PORT, () => {
   console.log(`Mixpost Integration: ${MIXPOST_API_KEY ? 'Enabled' : 'Disabled'}`);
   console.log(`Ready for conversions!\n`);
 });
+
 
