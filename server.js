@@ -65,9 +65,25 @@ const imageStorage = multer.diskStorage({
 
 const imageUpload = multer({
   storage: imageStorage,
-  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
+    // Accept image files and HEIC specifically
+    const allowedMimes = [
+      'image/jpeg',
+      'image/png',
+      'image/gif',
+      'image/webp',
+      'image/heic',
+      'image/heif',
+      'image/heic-sequence',
+      'image/heif-sequence'
+    ];
+    
+    // Also check file extension as fallback
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif'];
+    
+    if (file.mimetype.startsWith('image/') || allowedMimes.includes(file.mimetype) || allowedExts.includes(ext)) {
       cb(null, true);
     } else {
       cb(new Error('Only image files allowed'));
@@ -529,3 +545,4 @@ app.listen(PORT, () => {
   console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
   console.log('========================================\n');
 });
+
