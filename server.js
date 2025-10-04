@@ -1,6 +1,7 @@
 const express = require('express');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
+const sharp = require('sharp');
 const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
@@ -32,17 +33,17 @@ app.use(cors({
 }));
 app.use(express.json());
 
-// Storage setup
-const storage = multer.diskStorage({
-  destination: 'uploads/',
+// Storage setup for videos
+const videoStorage = multer.diskStorage({
+  destination: 'uploads/videos/',
   filename: (req, file, cb) => {
     const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, uniqueName + path.extname(file.originalname));
   }
 });
 
-const upload = multer({ 
-  storage,
+const videoUpload = multer({ 
+  storage: videoStorage,
   limits: { fileSize: 500 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (file.mimetype.startsWith('video/')) {
@@ -53,8 +54,29 @@ const upload = multer({
   }
 });
 
+// Storage setup for images
+const imageStorage = multer.diskStorage({
+  destination: 'uploads/images/',
+  filename: (req, file, cb) => {
+    const uniqueName = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, uniqueName + path.extname(file.originalname));
+  }
+});
+
+const imageUpload = multer({
+  storage: imageStorage,
+  limits: { fileSize: 50 * 1024 * 1024 }, // 50MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only image files allowed'));
+    }
+  }
+});
+
 // Ensure directories exist
-['uploads', 'processed'].forEach(dir => {
+['uploads/videos', 'uploads/images', 'processed/videos', 'processed/images'].forEach(dir => {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
@@ -64,7 +86,7 @@ const upload = multer({
 const jobs = new Map();
 let jobCounter = 0;
 
-// HIGH QUALITY SETTINGS FOR 1080p
+// HIGH QUALITY VIDEO SETTINGS
 const HIGH_QUALITY_SETTINGS = {
   crf: 18,
   preset: 'slow',
@@ -78,10 +100,11 @@ const HIGH_QUALITY_SETTINGS = {
   pixelFormat: 'yuv420p'
 };
 
-// High-quality video processing function
+// ==================== VIDEO PROCESSING ====================
+
 async function processVideoHighQuality(inputPath, outputPath, config) {
   return new Promise((resolve, reject) => {
-    console.log(`Processing: ${path.basename(outputPath)}`);
+    console.log(`Processing video: ${path.basename(outputPath)}`);
     
     let command = ffmpeg(inputPath);
     const videoFilters = [];
@@ -140,15 +163,15 @@ async function processVideoHighQuality(inputPath, outputPath, config) {
       .on('progress', (progress) => {
         const percent = Math.round(progress.percent || 0);
         if (percent % 10 === 0) {
-          console.log(`Progress: ${percent}%`);
+          console.log(`Video progress: ${percent}%`);
         }
       })
       .on('end', () => {
-        console.log(`Completed: ${path.basename(outputPath)}`);
+        console.log(`Video completed: ${path.basename(outputPath)}`);
         resolve();
       })
       .on('error', (error) => {
-        console.error(`Error: ${error.message}`);
+        console.error(`Video error: ${error.message}`);
         reject(error);
       })
       .run();
@@ -157,51 +180,93 @@ async function processVideoHighQuality(inputPath, outputPath, config) {
 
 function generateConfig(index) {
   return {
-    speed: 1,        // No speed change
-    brightness: 0,   // No brightness change
-    contrast: 1,     // No contrast change
-    saturation: 1,   // No saturation change
-    scale: 1,        // No scaling beyond 1080p conversion
-    flip: false      // No flipping
+    speed: 1,
+    brightness: 0,
+    contrast: 1,
+    saturation: 1,
+    scale: 1,
+    flip: false
   };
 }
 
 function calculateSimilarity(config) {
-  let similarity = 100;
-  if (Math.abs(config.speed - 1) > 0.02) similarity -= 5;
-  if (Math.abs(config.brightness) > 0.01) similarity -= 3;
-  if (Math.abs(config.contrast - 1) > 0.01) similarity -= 3;
-  if (config.flip) similarity -= 8;
-  if (Math.abs(config.scale - 1) > 0.01) similarity -= 2;
-  return Math.max(60, Math.min(95, similarity));
+  return 100;
 }
 
-// Routes
+// ==================== IMAGE PROCESSING ====================
+
+async function convertImage(inputPath, outputPath, format, quality) {
+  console.log(`Converting image: ${path.basename(inputPath)} -> ${format.toUpperCase()}`);
+  
+  const image = sharp(inputPath);
+  const metadata = await image.metadata();
+  
+  console.log(`Original format: ${metadata.format}, Size: ${metadata.width}x${metadata.height}`);
+  
+  if (format === 'png') {
+    await image
+      .png({ 
+        quality: 100, 
+        compressionLevel: 9,
+        effort: 10
+      })
+      .toFile(outputPath);
+  } else if (format === 'jpg' || format === 'jpeg') {
+    await image
+      .jpeg({ 
+        quality: parseInt(quality), 
+        mozjpeg: true 
+      })
+      .toFile(outputPath);
+  }
+  
+  const outputStats = fs.statSync(outputPath);
+  const inputStats = fs.statSync(inputPath);
+  
+  console.log(`Image converted successfully`);
+  console.log(`Input size: ${(inputStats.size / 1024).toFixed(2)} KB`);
+  console.log(`Output size: ${(outputStats.size / 1024).toFixed(2)} KB`);
+  
+  return {
+    originalFormat: metadata.format,
+    width: metadata.width,
+    height: metadata.height,
+    originalSize: inputStats.size,
+    outputSize: outputStats.size
+  };
+}
+
+// ==================== ROUTES ====================
+
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'SUCCESS', 
-    message: 'High-Quality 1080p FFmpeg processing ready',
-    ffmpeg: 'Available',
-    mixpost: {
-      configured: MIXPOST_API_KEY !== 'your-api-key-here',
-      baseUrl: MIXPOST_BASE_URL
+    message: 'High-Quality Video & Image Converter ready',
+    features: {
+      video: 'Available (FFmpeg)',
+      image: 'Available (Sharp)',
+      mixpost: MIXPOST_API_KEY !== 'your-api-key-here'
     },
-    quality: {
+    videoQuality: {
       resolution: '1080p',
       crf: HIGH_QUALITY_SETTINGS.crf,
-      preset: HIGH_QUALITY_SETTINGS.preset,
-      videoBitrate: HIGH_QUALITY_SETTINGS.videoBitrate,
-      audioBitrate: HIGH_QUALITY_SETTINGS.audioBitrate
+      preset: HIGH_QUALITY_SETTINGS.preset
+    },
+    imageFormats: {
+      input: ['JPEG', 'PNG', 'WebP', 'GIF', 'HEIC', 'TIFF', 'AVIF'],
+      output: ['PNG', 'JPG']
     }
   });
 });
 
-app.post('/api/video/upload', upload.single('video'), (req, res) => {
+// ==================== VIDEO ENDPOINTS ====================
+
+app.post('/api/video/upload', videoUpload.single('video'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No video uploaded' });
   }
   
-  console.log(`Upload received: ${req.file.originalname}`);
+  console.log(`Video upload: ${req.file.originalname}`);
   
   res.json({
     success: true,
@@ -215,9 +280,10 @@ app.post('/api/video/process', async (req, res) => {
   const { videoId, variationCount = 1 } = req.body;
   const jobId = ++jobCounter;
   
-  console.log(`Starting job ${jobId}: ${variationCount} variations`);
+  console.log(`Starting video job ${jobId}`);
   
   jobs.set(jobId, {
+    type: 'video',
     status: 'active',
     progress: 0,
     data: null,
@@ -229,7 +295,7 @@ app.post('/api/video/process', async (req, res) => {
   res.json({ 
     success: true, 
     jobId,
-    message: `Processing ${variationCount} high-quality 1080p variations`
+    message: 'Processing high-quality 1080p video'
   });
 });
 
@@ -237,21 +303,17 @@ async function processVideos(jobId, videoId, count) {
   const job = jobs.get(jobId);
   
   try {
-    const files = fs.readdirSync('uploads').filter(f => f.startsWith(videoId));
+    const files = fs.readdirSync('uploads/videos').filter(f => f.startsWith(videoId));
     if (files.length === 0) {
-      throw new Error('Input file not found');
+      throw new Error('Input video file not found');
     }
     
-    const actualInput = `uploads/${files[0]}`;
+    const actualInput = `uploads/videos/${files[0]}`;
     const results = [];
     
-    console.log(`Processing ${count} variations from: ${files[0]}`);
-    
     for (let i = 0; i < count; i++) {
-      console.log(`\n[${i + 1}/${count}] Generating variation ${i + 1}...`);
-      
       const config = generateConfig(i);
-      const outputPath = `processed/${videoId}_variation_${i + 1}.mp4`;
+      const outputPath = `processed/videos/${videoId}_variation_${i + 1}.mp4`;
       
       await processVideoHighQuality(actualInput, outputPath, config);
       
@@ -275,10 +337,10 @@ async function processVideos(jobId, videoId, count) {
     job.completedTime = Date.now();
     job.totalTime = ((job.completedTime - job.startTime) / 1000).toFixed(1) + 's';
     
-    console.log(`\nJob ${jobId} completed! Total time: ${job.totalTime}`);
+    console.log(`Video job ${jobId} completed in ${job.totalTime}`);
     
   } catch (error) {
-    console.error(`Job ${jobId} failed:`, error.message);
+    console.error(`Video job ${jobId} failed:`, error.message);
     job.status = 'failed';
     job.error = error.message;
   }
@@ -286,7 +348,7 @@ async function processVideos(jobId, videoId, count) {
 
 app.get('/api/video/status/:jobId', (req, res) => {
   const job = jobs.get(parseInt(req.params.jobId));
-  if (!job) {
+  if (!job || job.type !== 'video') {
     return res.json({ status: 'not_found' });
   }
   
@@ -300,59 +362,103 @@ app.get('/api/video/status/:jobId', (req, res) => {
 });
 
 app.get('/api/video/download/:videoId', (req, res) => {
-  const filePath = `processed/${req.params.videoId}.mp4`;
+  const filePath = `processed/videos/${req.params.videoId}.mp4`;
   
   if (fs.existsSync(filePath)) {
-    console.log(`Download: ${req.params.videoId}.mp4`);
     res.download(filePath);
   } else {
-    console.log(`File not found: ${req.params.videoId}.mp4`);
-    res.status(404).json({ error: 'File not found' });
+    res.status(404).json({ error: 'Video file not found' });
   }
 });
 
-// MIXPOST INTEGRATION ENDPOINT WITH FULL DEBUG LOGGING
-app.post('/api/mixpost/upload', async (req, res) => {
-  const { videoFilename, workspaceId } = req.body;
+// ==================== IMAGE ENDPOINTS ====================
+
+app.post('/api/image/upload', imageUpload.single('image'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No image uploaded' });
+  }
   
-  console.log('\n========== MIXPOST UPLOAD DEBUG ==========');
-  console.log('Timestamp:', new Date().toISOString());
-  console.log('Video filename:', videoFilename);
+  const { format = 'png', quality = 95 } = req.body;
+  
+  console.log(`Image upload: ${req.file.originalname}, converting to ${format.toUpperCase()}`);
+  
+  try {
+    const imageId = path.parse(req.file.filename).name;
+    const outputFilename = `${imageId}.${format}`;
+    const outputPath = `processed/images/${outputFilename}`;
+    
+    const result = await convertImage(
+      req.file.path, 
+      outputPath, 
+      format, 
+      quality
+    );
+    
+    res.json({
+      success: true,
+      imageId: imageId,
+      filename: outputFilename,
+      downloadUrl: `/api/image/download/${outputFilename}`,
+      originalFormat: result.originalFormat,
+      outputFormat: format.toUpperCase(),
+      dimensions: `${result.width}x${result.height}`,
+      originalSize: (result.originalSize / 1024).toFixed(2) + ' KB',
+      outputSize: (result.outputSize / 1024).toFixed(2) + ' KB',
+      compression: ((1 - result.outputSize / result.originalSize) * 100).toFixed(1) + '%'
+    });
+    
+  } catch (error) {
+    console.error('Image conversion error:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.get('/api/image/download/:filename', (req, res) => {
+  const filePath = `processed/images/${req.params.filename}`;
+  
+  if (fs.existsSync(filePath)) {
+    res.download(filePath);
+  } else {
+    res.status(404).json({ error: 'Image file not found' });
+  }
+});
+
+// ==================== MIXPOST INTEGRATION ====================
+
+app.post('/api/mixpost/upload', async (req, res) => {
+  const { filename, workspaceId } = req.body;
+  
+  console.log('\n========== MIXPOST UPLOAD ==========');
+  console.log('Filename:', filename);
   console.log('Workspace ID:', workspaceId);
-  console.log('MIXPOST_BASE_URL:', MIXPOST_BASE_URL);
-  console.log('MIXPOST_API_KEY configured:', MIXPOST_API_KEY !== 'your-api-key-here');
-  console.log('API Key (first 20 chars):', MIXPOST_API_KEY ? MIXPOST_API_KEY.substring(0, 20) + '...' : 'NOT SET');
   
   if (!MIXPOST_API_KEY || MIXPOST_API_KEY === 'your-api-key-here') {
-    console.log('ERROR: Mixpost API key not configured');
-    return res.status(500).json({ error: 'Mixpost API key not configured on server' });
+    return res.status(500).json({ error: 'Mixpost API key not configured' });
   }
   
   if (!workspaceId) {
-    console.log('ERROR: Workspace ID missing');
-    return res.status(400).json({ error: 'Workspace ID is required' });
+    return res.status(400).json({ error: 'Workspace ID required' });
   }
   
   try {
-    const videoPath = path.join(__dirname, 'processed', videoFilename);
-    console.log('Video path:', videoPath);
-    
-    if (!fs.existsSync(videoPath)) {
-      console.log('ERROR: Video file not found at path');
-      return res.status(404).json({ error: 'Video file not found' });
+    // Check both video and image directories
+    let filePath;
+    if (fs.existsSync(`processed/videos/${filename}`)) {
+      filePath = `processed/videos/${filename}`;
+    } else if (fs.existsSync(`processed/images/${filename}`)) {
+      filePath = `processed/images/${filename}`;
+    } else {
+      return res.status(404).json({ error: 'File not found' });
     }
     
-    const fileStats = fs.statSync(videoPath);
-    console.log('Video file size:', (fileStats.size / (1024 * 1024)).toFixed(2), 'MB');
+    console.log('File path:', filePath);
+    console.log('File size:', (fs.statSync(filePath).size / 1024).toFixed(2), 'KB');
     
     const formData = new FormData();
-    formData.append('file', fs.createReadStream(videoPath));
+    formData.append('file', fs.createReadStream(filePath));
     
-    // Construct the correct Mixpost URL based on documentation
     const uploadUrl = `${MIXPOST_BASE_URL}/api/${workspaceId}/media`;
     console.log('Upload URL:', uploadUrl);
-    
-    console.log('Making request to Mixpost API...');
     
     const response = await fetch(uploadUrl, {
       method: 'POST',
@@ -364,80 +470,62 @@ app.post('/api/mixpost/upload', async (req, res) => {
     });
     
     console.log('Response status:', response.status);
-    console.log('Response status text:', response.statusText);
-    console.log('Response headers:', JSON.stringify(response.headers.raw(), null, 2));
     
     const responseText = await response.text();
-    console.log('Response body (first 500 chars):', responseText.substring(0, 500));
     
     if (!response.ok) {
-      console.log('ERROR: Mixpost API returned non-OK status');
-      console.log('Full error response:', responseText);
-      
-      throw new Error(`Mixpost API error (${response.status}): ${responseText.substring(0, 200)}`);
+      console.log('Error response:', responseText.substring(0, 200));
+      throw new Error(`Mixpost API error (${response.status})`);
     }
     
-    let result;
-    try {
-      result = JSON.parse(responseText);
-      console.log('Parsed response:', JSON.stringify(result, null, 2));
-    } catch (parseError) {
-      console.log('ERROR: Failed to parse response as JSON');
-      throw new Error('Invalid JSON response from Mixpost');
-    }
-    
-    console.log('SUCCESS: Video uploaded to Mixpost');
-    console.log('Media ID:', result.id || result.uuid);
-    console.log('==========================================\n');
+    const result = JSON.parse(responseText);
+    console.log('SUCCESS - Media ID:', result.id || result.uuid);
+    console.log('====================================\n');
     
     res.json({ 
       success: true, 
       mediaId: result.id || result.uuid,
       mediaUrl: result.url,
-      message: 'Video uploaded to Mixpost workspace'
+      message: 'Uploaded to Mixpost workspace'
     });
     
   } catch (error) {
-    console.error('EXCEPTION in Mixpost upload:', error.message);
-    console.error('Stack trace:', error.stack);
-    console.log('==========================================\n');
-    
-    res.status(500).json({ 
-      error: error.message,
-      details: 'Check server logs for more information'
-    });
+    console.error('Mixpost upload error:', error.message);
+    console.log('====================================\n');
+    res.status(500).json({ error: error.message });
   }
 });
 
-// Cleanup old files
+// ==================== CLEANUP ====================
+
 setInterval(() => {
   const now = Date.now();
   const maxAge = 24 * 60 * 60 * 1000;
   
-  ['uploads', 'processed'].forEach(dir => {
+  ['uploads/videos', 'uploads/images', 'processed/videos', 'processed/images'].forEach(dir => {
+    if (!fs.existsSync(dir)) return;
+    
     fs.readdirSync(dir).forEach(file => {
       const filePath = path.join(dir, file);
       const stats = fs.statSync(filePath);
       if (now - stats.mtimeMs > maxAge) {
         fs.unlinkSync(filePath);
-        console.log(`Cleaned up old file: ${file}`);
+        console.log(`Cleaned: ${file}`);
       }
     });
   });
 }, 60 * 60 * 1000);
 
+// ==================== START SERVER ====================
+
 app.listen(PORT, () => {
-  console.log(`\n========================================`);
-  console.log(`High-Quality Video Converter Server`);
-  console.log(`========================================`);
+  console.log('\n========================================');
+  console.log('TYPA Converter Server');
+  console.log('========================================');
   console.log(`Port: ${PORT}`);
-  console.log(`Quality: 1080p CRF ${HIGH_QUALITY_SETTINGS.crf}`);
-  console.log(`Preset: ${HIGH_QUALITY_SETTINGS.preset}`);
-  console.log(`Video Bitrate: ${HIGH_QUALITY_SETTINGS.videoBitrate}`);
-  console.log(`Audio Bitrate: ${HIGH_QUALITY_SETTINGS.audioBitrate}`);
-  console.log(`Mixpost: ${MIXPOST_API_KEY !== 'your-api-key-here' ? 'Configured' : 'Not configured'}`);
-  console.log(`Mixpost URL: ${MIXPOST_BASE_URL}`);
-  console.log(`========================================\n`);
+  console.log('Features:');
+  console.log('  - Video: 1080p High Quality');
+  console.log('  - Images: PNG/JPG conversion');
+  console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
+  console.log('========================================\n');
 });
-
-
