@@ -211,9 +211,6 @@ function calculateSimilarity(config) {
 
 // ==================== IMAGE PROCESSING ====================
 
-const { promisify } = require('util');
-const exec = promisify(require('child_process').exec);
-
 async function convertImage(inputPath, outputPath, format, quality) {
   console.log(`Converting image: ${path.basename(inputPath)} -> ${format.toUpperCase()}`);
   
@@ -617,6 +614,7 @@ app.listen(PORT, () => {
   console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
   console.log('========================================\n');
 });
+
 
 
 
