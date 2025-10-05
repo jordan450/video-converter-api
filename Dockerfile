@@ -8,6 +8,9 @@ RUN apt-get update && apt-get install -y \
     libheif-dev \
     libde265-dev \
     libx265-dev \
+    python3 \
+    make \
+    g++ \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -16,8 +19,11 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install --production
+# Install dependencies EXCEPT sharp first
+RUN npm install --production --ignore-scripts
+
+# Now rebuild sharp with the system libraries available
+RUN npm rebuild sharp
 
 # Copy application code
 COPY . .
