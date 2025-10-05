@@ -214,42 +214,44 @@ function calculateSimilarity(config) {
 async function convertImage(inputPath, outputPath, format, quality) {
   console.log(`Converting image: ${path.basename(inputPath)} -> ${format.toUpperCase()}`);
   
-  const image = sharp(inputPath);
-  const metadata = await image.metadata();
-  
-  console.log(`Original format: ${metadata.format}, Size: ${metadata.width}x${metadata.height}`);
-  
-  if (format === 'png') {
-    await image
-      .png({ 
-        quality: 100, 
-        compressionLevel: 9,
-        effort: 10
-      })
-      .toFile(outputPath);
-  } else if (format === 'jpg' || format === 'jpeg') {
-    await image
-      .jpeg({ 
-        quality: parseInt(quality), 
-        mozjpeg: true 
-      })
-      .toFile(outputPath);
+  try {
+    const image = sharp(inputPath);
+    const metadata = await image.metadata();
+    
+    // Check if it's a HEIC file
+    if (metadata.format === 'heif' || metadata.format === 'heic') {
+      throw new Error('HEIC format is not supported. Please convert your image to JPG or PNG first, or use an online converter like https://heictojpg.com');
+    }
+    
+    if (format === 'png') {
+      await image
+        .png({ quality: 100, compressionLevel: 9, effort: 10 })
+        .toFile(outputPath);
+    } else if (format === 'jpg' || format === 'jpeg') {
+      await image
+        .jpeg({ quality: parseInt(quality), mozjpeg: true })
+        .toFile(outputPath);
+    }
+    
+    const outputStats = fs.statSync(outputPath);
+    const inputStats = fs.statSync(inputPath);
+    
+    console.log(`Image converted successfully`);
+    
+    return {
+      originalFormat: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      originalSize: inputStats.size,
+      outputSize: outputStats.size
+    };
+  } catch (error) {
+    // More specific error for HEIC
+    if (error.message.includes('HEIC') || error.message.includes('heif') || error.message.includes('decoding plugin')) {
+      throw new Error('HEIC/HEIF format requires special libraries. Please convert to JPG or PNG first using https://heictojpg.com');
+    }
+    throw error;
   }
-  
-  const outputStats = fs.statSync(outputPath);
-  const inputStats = fs.statSync(inputPath);
-  
-  console.log(`Image converted successfully`);
-  console.log(`Input size: ${(inputStats.size / 1024).toFixed(2)} KB`);
-  console.log(`Output size: ${(outputStats.size / 1024).toFixed(2)} KB`);
-  
-  return {
-    originalFormat: metadata.format,
-    width: metadata.width,
-    height: metadata.height,
-    originalSize: inputStats.size,
-    outputSize: outputStats.size
-  };
 }
 
 // ==================== ROUTES ====================
@@ -545,4 +547,5 @@ app.listen(PORT, () => {
   console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
   console.log('========================================\n');
 });
+
 
