@@ -214,33 +214,48 @@ function calculateSimilarity(config) {
 async function convertImage(inputPath, outputPath, format, quality) {
   console.log(`Converting image: ${path.basename(inputPath)} -> ${format.toUpperCase()}`);
   
-  const image = sharp(inputPath);
-  const metadata = await image.metadata();
-  
-  console.log(`Original format: ${metadata.format}, Size: ${metadata.width}x${metadata.height}`);
-  
-  if (format === 'png') {
-    await image
-      .png({ quality: 100, compressionLevel: 9, effort: 10 })
-      .toFile(outputPath);
-  } else if (format === 'jpg' || format === 'jpeg') {
-    await image
-      .jpeg({ quality: parseInt(quality), mozjpeg: true })
-      .toFile(outputPath);
+  try {
+    const image = sharp(inputPath);
+    const metadata = await image.metadata();
+    
+    console.log('Image metadata:', {
+      format: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      space: metadata.space,
+      channels: metadata.channels
+    });
+    
+    // Sharp should handle HEIF/HEIC automatically now
+    if (format === 'png') {
+      await image
+        .png({ quality: 100, compressionLevel: 9, effort: 10 })
+        .toFile(outputPath);
+    } else if (format === 'jpg' || format === 'jpeg') {
+      await image
+        .jpeg({ quality: parseInt(quality), mozjpeg: true })
+        .toFile(outputPath);
+    }
+    
+    const outputStats = fs.statSync(outputPath);
+    const inputStats = fs.statSync(inputPath);
+    
+    console.log(`Image converted successfully`);
+    console.log(`  Original: ${metadata.format} (${(inputStats.size / 1024 / 1024).toFixed(2)}MB)`);
+    console.log(`  Output: ${format} (${(outputStats.size / 1024 / 1024).toFixed(2)}MB)`);
+    
+    return {
+      originalFormat: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      originalSize: inputStats.size,
+      outputSize: outputStats.size
+    };
+  } catch (error) {
+    console.error('Image conversion error:', error.message);
+    console.error('Stack:', error.stack);
+    throw error;
   }
-  
-  const outputStats = fs.statSync(outputPath);
-  const inputStats = fs.statSync(inputPath);
-  
-  console.log(`Image converted successfully`);
-  
-  return {
-    originalFormat: metadata.format,
-    width: metadata.width,
-    height: metadata.height,
-    originalSize: inputStats.size,
-    outputSize: outputStats.size
-  };
 }
 
 // ==================== ROUTES ====================
@@ -536,6 +551,7 @@ app.listen(PORT, () => {
   console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
   console.log('========================================\n');
 });
+
 
 
 
