@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     libheif-dev \
     libde265-dev \
     libx265-dev \
+    pkg-config \
     python3 \
     make \
     g++ \
@@ -16,14 +17,20 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
+# Environment variables to force Sharp to use system libvips
+ENV SHARP_IGNORE_GLOBAL_LIBVIPS=0
+ENV npm_config_sharp_libvips_binary_host=""
+
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies EXCEPT sharp first
-RUN npm install --production --ignore-scripts
+# Remove sharp from package-lock if it exists, then install
+RUN rm -rf node_modules package-lock.json && \
+    npm install --production --build-from-source sharp && \
+    npm install --production
 
-# Now rebuild sharp with the system libraries available
-RUN npm rebuild sharp
+# Verify Sharp has HEIC support
+RUN node -e "const sharp = require('sharp'); sharp.format; console.log('Sharp formats:', Object.keys(sharp.format));"
 
 # Copy application code
 COPY . .
