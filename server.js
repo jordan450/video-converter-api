@@ -70,29 +70,19 @@ const imageUpload = multer({
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
     
-    // Reject HEIC files upfront with clear message
+    // Reject HEIC files with clear message
     if (ext === '.heic' || ext === '.heif') {
-      cb(new Error('HEIC files are not supported. Please convert to JPG or PNG first at https://heictojpg.com'));
+      cb(new Error('HEIC files are not supported on this platform. Please use our dedicated HEIC converter or convert to JPG/PNG first.'));
       return;
     }
     
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     const allowedExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
-    if (file.mimetype.startsWith('image/') || allowedExts.includes(ext)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only JPG, PNG, GIF, and WebP images are supported'));
-    }
-  }
-});
-    
-    // Also check file extension as fallback
-    const ext = path.extname(file.originalname).toLowerCase();
-    const allowedExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.heic', '.heif'];
     
     if (file.mimetype.startsWith('image/') || allowedMimes.includes(file.mimetype) || allowedExts.includes(ext)) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files allowed'));
+      cb(new Error('Only JPG, PNG, GIF, and WebP images are supported'));
     }
   }
 });
@@ -259,50 +249,7 @@ async function convertImage(inputPath, outputPath, format, quality) {
   }
 }
     
-    // Use Sharp for non-HEIC formats
-    const image = sharp(inputPath);
-    const metadata = await image.metadata();
-    
-    console.log('Image metadata:', {
-      format: metadata.format,
-      width: metadata.width,
-      height: metadata.height
-    });
-    
-    if (format === 'png') {
-      await image
-        .png({ quality: 100, compressionLevel: 9, effort: 10 })
-        .toFile(outputPath);
-    } else if (format === 'jpg' || format === 'jpeg') {
-      await image
-        .jpeg({ quality: parseInt(quality), mozjpeg: true })
-        .toFile(outputPath);
-    }
-    
-    const outputStats = fs.statSync(outputPath);
-    const inputStats = fs.statSync(inputPath);
-    
-    console.log(`Image converted successfully`);
-    console.log(`  Original: ${metadata.format} (${(inputStats.size / 1024 / 1024).toFixed(2)}MB)`);
-    console.log(`  Output: ${format} (${(outputStats.size / 1024 / 1024).toFixed(2)}MB)`);
-    
-    return {
-      originalFormat: metadata.format,
-      width: metadata.width,
-      height: metadata.height,
-      originalSize: inputStats.size,
-      outputSize: outputStats.size
-    };
-  } catch (error) {
-    console.error('Image conversion error:', error.message);
-    
-    if (isHeic) {
-      throw new Error('HEIC format could not be converted. Please convert your image to JPG or PNG first using https://heictojpg.com');
-    }
-    
-    throw error;
-  }
-}
+  
 // ==================== ROUTES ====================
 
 app.get('/health', (req, res) => {
@@ -596,6 +543,7 @@ app.listen(PORT, () => {
   console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
   console.log('========================================\n');
 });
+
 
 
 
