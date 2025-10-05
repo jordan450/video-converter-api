@@ -211,13 +211,16 @@ function calculateSimilarity(config) {
 
 // ==================== IMAGE PROCESSING ====================
 
-const { promisify } = require('util');
-const exec = promisify(require('child_process').exec);
-
 async function convertImage(inputPath, outputPath, format, quality) {
   console.log(`Converting image: ${path.basename(inputPath)} -> ${format.toUpperCase()}`);
   
   try {
+    // Check if it's a HEIC file upfront
+    const ext = path.extname(inputPath).toLowerCase();
+    if (ext === '.heic' || ext === '.heif') {
+      throw new Error('HEIC_NOT_SUPPORTED');
+    }
+    
     const image = sharp(inputPath);
     const metadata = await image.metadata();
     
@@ -227,33 +230,38 @@ async function convertImage(inputPath, outputPath, format, quality) {
       height: metadata.height
     });
     
-    // Use FFmpeg for HEIC files as fallback
-    if (metadata.format === 'heif' || path.extname(inputPath).toLowerCase() === '.heic') {
-      console.log('Detected HEIC file, using FFmpeg for conversion');
-      
-      const outputFormat = format === 'png' ? 'png' : 'jpg';
-      const ffmpegQuality = format === 'png' ? '' : `-q:v ${Math.round((100 - quality) / 10)}`;
-      
-      const command = `ffmpeg -i "${inputPath}" ${ffmpegQuality} "${outputPath}"`;
-      console.log('FFmpeg command:', command);
-      
-      await exec(command);
-      
-      const outputStats = fs.statSync(outputPath);
-      const inputStats = fs.statSync(inputPath);
-      
-      console.log(`HEIC converted via FFmpeg successfully`);
-      console.log(`  Original: HEIC (${(inputStats.size / 1024 / 1024).toFixed(2)}MB)`);
-      console.log(`  Output: ${format} (${(outputStats.size / 1024 / 1024).toFixed(2)}MB)`);
-      
-      return {
-        originalFormat: 'heic',
-        width: metadata.width,
-        height: metadata.height,
-        originalSize: inputStats.size,
-        outputSize: outputStats.size
-      };
+    if (format === 'png') {
+      await image
+        .png({ quality: 100, compressionLevel: 9, effort: 10 })
+        .toFile(outputPath);
+    } else if (format === 'jpg' || format === 'jpeg') {
+      await image
+        .jpeg({ quality: parseInt(quality), mozjpeg: true })
+        .toFile(outputPath);
     }
+    
+    const outputStats = fs.statSync(outputPath);
+    const inputStats = fs.statSync(inputPath);
+    
+    console.log(`Image converted successfully`);
+    console.log(`  Original: ${metadata.format} (${(inputStats.size / 1024 / 1024).toFixed(2)}MB)`);
+    console.log(`  Output: ${format} (${(outputStats.size / 1024 / 1024).toFixed(2)}MB)`);
+    
+    return {
+      originalFormat: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      originalSize: inputStats.size,
+      outputSize: outputStats.size
+    };
+  } catch (error) {
+    if (error.message === 'HEIC_NOT_SUPPORTED') {
+      throw new Error('HEIC format is not currently supported. Please convert your image to JPG or PNG first using: https://heictojpg.com or your phone\'s export settings.');
+    }
+    console.error('Image conversion error:', error.message);
+    throw error;
+  }
+}
     
     // Use Sharp for other formats
     if (format === 'png') {
@@ -580,6 +588,7 @@ app.listen(PORT, () => {
   console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
   console.log('========================================\n');
 });
+
 
 
 
