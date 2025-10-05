@@ -7,8 +7,7 @@ const fs = require('fs');
 const cors = require('cors');
 const FormData = require('form-data');
 const fetch = require('node-fetch');
-const { promisify } = require('util');
-const exec = promisify(require('child_process').exec);
+
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -597,6 +596,7 @@ app.listen(PORT, () => {
   console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
   console.log('========================================\n');
 });
+
 
 
 
