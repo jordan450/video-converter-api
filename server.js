@@ -220,35 +220,45 @@ function calculateSimilarity(config) {
 async function convertImage(inputPath, outputPath, format, quality) {
   console.log(`Converting image: ${path.basename(inputPath)} -> ${format.toUpperCase()}`);
   
-  const ext = path.extname(inputPath).toLowerCase();
-  const isHeic = ext === '.heic' || ext === '.heif';
-  
   try {
-    // Try ImageMagick for HEIC files first
-    if (isHeic) {
-      console.log('Detected HEIC file, attempting ImageMagick conversion');
-      
-      const qualityParam = format === 'png' ? '-quality 100' : `-quality ${quality}`;
-      const command = `convert "${inputPath}" ${qualityParam} "${outputPath}"`;
-      
-      console.log('ImageMagick command:', command);
-      await exec(command);
-      
-      const outputStats = fs.statSync(outputPath);
-      const inputStats = fs.statSync(inputPath);
-      
-      console.log(`HEIC converted via ImageMagick successfully`);
-      console.log(`  Original: HEIC (${(inputStats.size / 1024 / 1024).toFixed(2)}MB)`);
-      console.log(`  Output: ${format} (${(outputStats.size / 1024 / 1024).toFixed(2)}MB)`);
-      
-      return {
-        originalFormat: 'heic',
-        width: null,
-        height: null,
-        originalSize: inputStats.size,
-        outputSize: outputStats.size
-      };
+    const image = sharp(inputPath);
+    const metadata = await image.metadata();
+    
+    console.log('Image metadata:', {
+      format: metadata.format,
+      width: metadata.width,
+      height: metadata.height
+    });
+    
+    if (format === 'png') {
+      await image
+        .png({ quality: 100, compressionLevel: 9, effort: 10 })
+        .toFile(outputPath);
+    } else if (format === 'jpg' || format === 'jpeg') {
+      await image
+        .jpeg({ quality: parseInt(quality), mozjpeg: true })
+        .toFile(outputPath);
     }
+    
+    const outputStats = fs.statSync(outputPath);
+    const inputStats = fs.statSync(inputPath);
+    
+    console.log(`Image converted successfully`);
+    console.log(`  Original: ${metadata.format} (${(inputStats.size / 1024 / 1024).toFixed(2)}MB)`);
+    console.log(`  Output: ${format} (${(outputStats.size / 1024 / 1024).toFixed(2)}MB)`);
+    
+    return {
+      originalFormat: metadata.format,
+      width: metadata.width,
+      height: metadata.height,
+      originalSize: inputStats.size,
+      outputSize: outputStats.size
+    };
+  } catch (error) {
+    console.error('Image conversion error:', error.message);
+    throw error;
+  }
+}
     
     // Use Sharp for non-HEIC formats
     const image = sharp(inputPath);
@@ -587,6 +597,7 @@ app.listen(PORT, () => {
   console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
   console.log('========================================\n');
 });
+
 
 
 
