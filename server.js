@@ -7,6 +7,8 @@ const fs = require('fs');
 const cors = require('cors');
 const FormData = require('form-data');
 const fetch = require('node-fetch');
+const { promisify } = require('util');
+const exec = promisify(require('child_process').exec);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -210,7 +212,6 @@ function calculateSimilarity(config) {
 }
 
 // ==================== IMAGE PROCESSING ====================
-
 async function convertImage(inputPath, outputPath, format, quality) {
   console.log(`Converting image: ${path.basename(inputPath)} -> ${format.toUpperCase()}`);
   
@@ -237,7 +238,7 @@ async function convertImage(inputPath, outputPath, format, quality) {
       
       return {
         originalFormat: 'heic',
-        width: null,  // ImageMagick doesn't provide metadata easily
+        width: null,
         height: null,
         originalSize: inputStats.size,
         outputSize: outputStats.size
@@ -288,39 +289,6 @@ async function convertImage(inputPath, outputPath, format, quality) {
     throw error;
   }
 }
-    
-    // Use Sharp for other formats
-    if (format === 'png') {
-      await image
-        .png({ quality: 100, compressionLevel: 9, effort: 10 })
-        .toFile(outputPath);
-    } else if (format === 'jpg' || format === 'jpeg') {
-      await image
-        .jpeg({ quality: parseInt(quality), mozjpeg: true })
-        .toFile(outputPath);
-    }
-    
-    const outputStats = fs.statSync(outputPath);
-    const inputStats = fs.statSync(inputPath);
-    
-    console.log(`Image converted successfully`);
-    console.log(`  Original: ${metadata.format} (${(inputStats.size / 1024 / 1024).toFixed(2)}MB)`);
-    console.log(`  Output: ${format} (${(outputStats.size / 1024 / 1024).toFixed(2)}MB)`);
-    
-    return {
-      originalFormat: metadata.format,
-      width: metadata.width,
-      height: metadata.height,
-      originalSize: inputStats.size,
-      outputSize: outputStats.size
-    };
-  } catch (error) {
-    console.error('Image conversion error:', error.message);
-    console.error('Stack:', error.stack);
-    throw error;
-  }
-}
-
 // ==================== ROUTES ====================
 
 app.get('/health', (req, res) => {
@@ -614,6 +582,7 @@ app.listen(PORT, () => {
   console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
   console.log('========================================\n');
 });
+
 
 
 
