@@ -1,8 +1,14 @@
-# Dockerfile for Railway deployment
-FROM node:18-alpine
+# Use Debian-based Node image for better library compatibility
+FROM node:18-bullseye
 
-# Install FFmpeg
-RUN apk add --no-cache ffmpeg
+# Install FFmpeg and image processing libraries including HEIC support
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libvips-dev \
+    libheif-dev \
+    libde265-dev \
+    libx265-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
 WORKDIR /app
@@ -17,30 +23,16 @@ RUN npm install --production
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p uploads outputs
+RUN mkdir -p uploads/videos uploads/images uploads/audio processed/videos processed/images processed/audio
 
 # Expose port
-EXPOSE 3001
+EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:3001/api/health', (res) => { \
+  CMD node -e "require('http').get('http://localhost:3000/health', (res) => { \
     if (res.statusCode === 200) process.exit(0); else process.exit(1); \
   }).on('error', () => process.exit(1));"
 
 # Start the application
 CMD ["npm", "start"]
-
-# .dockerignore content (create this file too):
-# node_modules
-# npm-debug.log
-# .git
-# .gitignore
-# README.md
-# .env
-# .nyc_output
-# coverage
-# .docker
-# uploads/*
-# outputs/*
-
