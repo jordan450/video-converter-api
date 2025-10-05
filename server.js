@@ -211,6 +211,9 @@ function calculateSimilarity(config) {
 
 // ==================== IMAGE PROCESSING ====================
 
+const { promisify } = require('util');
+const exec = promisify(require('child_process').exec);
+
 async function convertImage(inputPath, outputPath, format, quality) {
   console.log(`Converting image: ${path.basename(inputPath)} -> ${format.toUpperCase()}`);
   
@@ -221,12 +224,38 @@ async function convertImage(inputPath, outputPath, format, quality) {
     console.log('Image metadata:', {
       format: metadata.format,
       width: metadata.width,
-      height: metadata.height,
-      space: metadata.space,
-      channels: metadata.channels
+      height: metadata.height
     });
     
-    // Sharp should handle HEIF/HEIC automatically now
+    // Use FFmpeg for HEIC files as fallback
+    if (metadata.format === 'heif' || path.extname(inputPath).toLowerCase() === '.heic') {
+      console.log('Detected HEIC file, using FFmpeg for conversion');
+      
+      const outputFormat = format === 'png' ? 'png' : 'jpg';
+      const ffmpegQuality = format === 'png' ? '' : `-q:v ${Math.round((100 - quality) / 10)}`;
+      
+      const command = `ffmpeg -i "${inputPath}" ${ffmpegQuality} "${outputPath}"`;
+      console.log('FFmpeg command:', command);
+      
+      await exec(command);
+      
+      const outputStats = fs.statSync(outputPath);
+      const inputStats = fs.statSync(inputPath);
+      
+      console.log(`HEIC converted via FFmpeg successfully`);
+      console.log(`  Original: HEIC (${(inputStats.size / 1024 / 1024).toFixed(2)}MB)`);
+      console.log(`  Output: ${format} (${(outputStats.size / 1024 / 1024).toFixed(2)}MB)`);
+      
+      return {
+        originalFormat: 'heic',
+        width: metadata.width,
+        height: metadata.height,
+        originalSize: inputStats.size,
+        outputSize: outputStats.size
+      };
+    }
+    
+    // Use Sharp for other formats
     if (format === 'png') {
       await image
         .png({ quality: 100, compressionLevel: 9, effort: 10 })
@@ -551,6 +580,7 @@ app.listen(PORT, () => {
   console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
   console.log('========================================\n');
 });
+
 
 
 
