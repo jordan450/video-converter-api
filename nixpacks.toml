@@ -1,2 +1,8 @@
 [phases.setup]
-aptPkgs = ['libheif-dev', 'libde265-dev']
+aptPkgs = ['libvips-dev', 'libheif-dev', 'libde265-dev', 'libx265-dev']
+
+[phases.install]
+cmds = ['npm install --include=optional']
+
+[phases.build]
+cmds = ['npm rebuild sharp']
