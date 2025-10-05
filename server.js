@@ -69,17 +69,22 @@ const imageUpload = multer({
   storage: imageStorage,
   limits: { fileSize: 50 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
-    // Accept image files and HEIC specifically
-    const allowedMimes = [
-      'image/jpeg',
-      'image/png',
-      'image/gif',
-      'image/webp',
-      'image/heic',
-      'image/heif',
-      'image/heic-sequence',
-      'image/heif-sequence'
-    ];
+    const ext = path.extname(file.originalname).toLowerCase();
+    
+    // Reject HEIC files upfront with clear message
+    if (ext === '.heic' || ext === '.heif') {
+      cb(new Error('HEIC files are not supported. Please convert to JPG or PNG first at https://heictojpg.com'));
+      return;
+    }
+    
+    const allowedExts = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+    if (file.mimetype.startsWith('image/') || allowedExts.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only JPG, PNG, GIF, and WebP images are supported'));
+    }
+  }
+});
     
     // Also check file extension as fallback
     const ext = path.extname(file.originalname).toLowerCase();
@@ -582,6 +587,7 @@ app.listen(PORT, () => {
   console.log('  - Mixpost: ' + (MIXPOST_API_KEY !== 'your-api-key-here' ? 'Enabled' : 'Disabled'));
   console.log('========================================\n');
 });
+
 
 
 
