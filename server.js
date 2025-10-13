@@ -333,6 +333,74 @@ app.get('/api/download-all/:jobId', async (req, res) => {
   archive.finalize();
 });
 
+// Upload to Mixpost endpoint
+app.post('/api/upload-to-mixpost', async (req, res) => {
+  const { jobId, versionKey, mixpostUrl, mixpostToken } = req.body;
+  
+  if (!jobId || !versionKey || !mixpostUrl || !mixpostToken) {
+    return res.status(400).json({ error: 'Missing required parameters' });
+  }
+
+  const job = jobs.get(jobId);
+  
+  if (!job || !job.versions[versionKey]) {
+    return res.status(404).json({ error: 'Version not found' });
+  }
+
+  const version = job.versions[versionKey];
+  
+  if (version.status !== 'completed') {
+    return res.status(400).json({ error: 'Version not ready' });
+  }
+
+  const filePath = path.join('processed', 'videos', version.filename);
+  
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+
+  try {
+    const FormData = require('form-data');
+    const fetch = require('node-fetch');
+    
+    const formData = new FormData();
+    formData.append('file', fs.createReadStream(filePath));
+    formData.append('name', `${job.originalFilename}_${versionKey}`);
+
+    const response = await fetch(`${mixpostUrl}/api/media`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${mixpostToken}`,
+        ...formData.getHeaders()
+      },
+      body: formData
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      console.log(`✅ Successfully uploaded ${versionKey} to Mixpost`);
+      res.json({ 
+        success: true, 
+        message: 'Uploaded to Mixpost successfully',
+        mixpostResponse: data 
+      });
+    } else {
+      console.error(`❌ Mixpost upload failed:`, data);
+      res.status(response.status).json({ 
+        error: 'Mixpost upload failed', 
+        details: data 
+      });
+    }
+  } catch (error) {
+    console.error('Mixpost upload error:', error);
+    res.status(500).json({ 
+      error: 'Failed to upload to Mixpost', 
+      details: error.message 
+    });
+  }
+});
+
 // ============================================
 // PROCESSING FUNCTIONS
 // ============================================
