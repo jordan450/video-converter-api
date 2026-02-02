@@ -77,14 +77,13 @@ const VERSION_PRESETS = {
 // ============================================
 
 app.get('/', (req, res) => {
-  res.json({ status: 'online', service: 'Multi-Version Video Converter API', version: '2.1.0' });
+  res.json({ 
+    status: 'online', 
+    service: 'Multi-Version Video Converter API',
+    version: '2.1.0'
+  });
 });
 
-app.get('/health', (req, res) => {
-  res.json({ status: 'online', timestamp: new Date().toISOString() });
-});
-
-// Primary conversion route used by your frontend
 app.post(['/api/video/process', '/api/video/upload', '/api/convert'], upload.any(), (req, res) => {
   const file = req.file || (req.files && req.files[0]);
   if (!file) return res.status(400).json({ error: 'No video file uploaded' });
@@ -98,34 +97,10 @@ app.post(['/api/video/process', '/api/video/upload', '/api/convert'], upload.any
     originalFilename: file.originalname
   });
 
-  res.json({ jobId, message: 'Processing started', versionCount: 1 });
+  res.json({ jobId, message: 'Processing started' });
   processMultipleVersions(file.path, jobId, ['version1']);
 });
 
-// Multi-version conversion endpoint
-app.post('/api/convert-multi', upload.single('video'), async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No video file uploaded' });
-
-  const versionCount = parseInt(req.body.versionCount) || 1;
-  const jobId = `multi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  
-  const versionsToProcess = {};
-  const versionKeys = Object.keys(VERSION_PRESETS).slice(0, versionCount);
-  versionKeys.forEach(key => { versionsToProcess[key] = { status: 'pending', progress: 0 }; });
-
-  jobs.set(jobId, {
-    status: 'processing',
-    versionCount,
-    versions: versionsToProcess,
-    startTime: Date.now(),
-    originalFilename: req.file.originalname
-  });
-
-  res.json({ jobId, message: `Processing started for ${versionCount} versions` });
-  processMultipleVersions(req.file.path, jobId, versionKeys);
-});
-
-// Unified status endpoint
 app.get(['/api/job/:jobId', '/api/video/status/:jobId'], (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
@@ -147,7 +122,6 @@ app.get(['/api/job/:jobId', '/api/video/status/:jobId'], (req, res) => {
   });
 });
 
-// Download individual version
 app.get('/api/download/:jobId/:versionKey', (req, res) => {
   const { jobId, versionKey } = req.params;
   const job = jobs.get(jobId);
@@ -158,7 +132,7 @@ app.get('/api/download/:jobId/:versionKey', (req, res) => {
 });
 
 // ============================================
-// CORRECTED MIXPOST UPLOAD ROUTE
+// MIXPOST UPLOAD ROUTE (MATCHES DOCUMENTATION)
 // ============================================
 
 app.post('/api/mixpost/upload', async (req, res) => {
@@ -171,19 +145,20 @@ app.post('/api/mixpost/upload', async (req, res) => {
   const filePath = path.join('processed', 'videos', filename);
   
   if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'File not found' });
+    return res.status(404).json({ error: 'File not found on server' });
   }
 
   try {
     const formData = new FormData();
+    // Key MUST be 'file' as per Mixpost API docs
     formData.append('file', fs.createReadStream(filePath));
 
-    // Fix: The guide requires workspaceUuid in the URL path
+    // Mixpost API requires Workspace UUID in the URL path
     const mixpostBaseUrl = 'https://autoposter.typamanagement.com';
     const uploadUrl = `${mixpostBaseUrl}/api/${workspaceId}/media`;
     const mixpostToken = 'kuWpPvLYPVdLX7c1qA3MmMFozHugLkO1U7KWl8vs6b4e64e1';
 
-    console.log(`🚀 Uploading to Mixpost: ${uploadUrl}`);
+    console.log(`📤 Uploading to Mixpost Workspace: ${workspaceId}`);
 
     const response = await fetch(uploadUrl, {
       method: 'POST',
@@ -197,19 +172,20 @@ app.post('/api/mixpost/upload', async (req, res) => {
     const data = await response.json();
 
     if (response.ok) {
+      console.log('✅ Mixpost Upload Success');
       res.json({ success: true, message: 'Uploaded to Mixpost successfully', data });
     } else {
-      console.error('❌ Mixpost API rejected the upload:', data);
-      res.status(response.status).json({ error: 'Mixpost upload failed', details: data });
+      console.error('❌ Mixpost API Error:', data);
+      res.status(response.status).json({ error: 'Mixpost rejected the upload', details: data });
     }
   } catch (error) {
-    console.error('❌ Server error during Mixpost upload:', error);
+    console.error('❌ Critical Server Error during Mixpost upload:', error.message);
     res.status(500).json({ error: 'Server error during upload', details: error.message });
   }
 });
 
 // ============================================
-// PROCESSING FUNCTIONS
+// PROCESSING LOGIC (20MBPS UPGRADES)
 // ============================================
 
 async function processMultipleVersions(inputPath, jobId, versionKeys) {
@@ -223,6 +199,7 @@ async function processMultipleVersions(inputPath, jobId, versionKeys) {
     job.status = 'failed';
     job.error = error.message;
   } finally {
+    // Keep cleanup delay to ensure files are fully written
     setTimeout(() => { if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath); }, 2000);
   }
 }
@@ -259,9 +236,12 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
 
       let command = ffmpeg(inputPath)
         .outputOptions([
-          '-b:v 20000k', '-maxrate 22000k', '-bufsize 44000k',
-          '-preset slow', '-pix_fmt yuv420p', '-profile:v high',
-          '-level 4.0', '-b:a 192k', '-ar 48000', '-movflags +faststart'
+          '-b:v 20000k', // Upgrade to 20Mbps
+          '-maxrate 22000k', 
+          '-bufsize 44000k',
+          '-preset fast', 
+          '-pix_fmt yuv420p', 
+          '-movflags +faststart'
         ])
         .videoFilters(filters.join(','));
 
@@ -287,7 +267,7 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
   });
 }
 
-// Cleanup job
+// Cleanup: 1 hour age
 setInterval(() => {
   const now = Date.now();
   for (const [jobId, job] of jobs.entries()) {
@@ -301,4 +281,4 @@ setInterval(() => {
   }
 }, 900000);
 
-app.listen(PORT, () => console.log(`📡 Server listening on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Video Server listening on port ${PORT}`));
