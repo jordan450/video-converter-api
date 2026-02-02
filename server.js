@@ -539,11 +539,12 @@ app.post('/api/mixpost/upload', async (req, res) => {
     formData.append('file', fs.createReadStream(filePath));
     formData.append('name', path.parse(filename).name);
 
-    // Mixpost API endpoint with authentication
-    const mixpostUrl = `https://autoposter.typamanagement.com/api/v1/workspaces/${workspaceId}/media`;
+    // Mixpost API endpoint - simplified format
+    const mixpostUrl = `https://autoposter.typamanagement.com/api/media`;
     const mixpostToken = 'kuWpPvLYPVdLX7c1qA3MmMFozHugLkO1U7KWl8vs6b4e64e1';
     
     console.log('   Uploading to:', mixpostUrl);
+    console.log('   With workspace:', workspaceId);
     
     const response = await fetch(mixpostUrl, {
       method: 'POST',
