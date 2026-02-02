@@ -577,9 +577,32 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
 
       const width = videoStream.width;
       const height = videoStream.height;
-      const is1080p = (width === 1920 && height === 1080);
+      const isPortrait = height > width;
+      const isLandscape = width > height;
+      const isSquare = width === height;
+      
+      // Check if already at target resolution
+      let is1080p = false;
+      let targetWidth, targetHeight;
+      
+      if (isPortrait) {
+        // Portrait: height should be 1920
+        is1080p = (height === 1920 && width === 1080);
+        targetWidth = 1080;
+        targetHeight = 1920;
+      } else if (isLandscape) {
+        // Landscape: width should be 1920
+        is1080p = (width === 1920 && height === 1080);
+        targetWidth = 1920;
+        targetHeight = 1080;
+      } else {
+        // Square: 1080x1080
+        is1080p = (width === 1080 && height === 1080);
+        targetWidth = 1080;
+        targetHeight = 1080;
+      }
 
-      console.log(`   Input resolution: ${width}x${height} ${is1080p ? '(Already 1080p - optimized processing)' : '(Will scale to 1080p)'}`);
+      console.log(`   Input resolution: ${width}x${height} ${isPortrait ? '(Portrait)' : isLandscape ? '(Landscape)' : '(Square)'} ${is1080p ? '(Already optimized - no scaling needed)' : `(Will scale to ${targetWidth}x${targetHeight})`}`);
 
       // Calculate crop dimensions
       let cropFilter = '';
@@ -589,15 +612,15 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
         const cropX = Math.floor((width - cropW) / 2);
         const cropY = Math.floor((height - cropH) / 2);
         
-        // Only scale if not already 1080p
+        // Only scale if not already at target resolution
         if (is1080p) {
           cropFilter = `crop=${cropW}:${cropH}:${cropX}:${cropY}`;
         } else {
-          cropFilter = `crop=${cropW}:${cropH}:${cropX}:${cropY},scale=1920:1080`;
+          cropFilter = `crop=${cropW}:${cropH}:${cropX}:${cropY},scale=${targetWidth}:${targetHeight}`;
         }
       } else {
-        // Only scale if not already 1080p
-        cropFilter = is1080p ? 'null' : 'scale=1920:1080';
+        // Only scale if not already at target resolution
+        cropFilter = is1080p ? 'null' : `scale=${targetWidth}:${targetHeight}`;
       }
 
       // Build filter chains
@@ -637,7 +660,7 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
         .on('start', (commandLine) => {
           console.log(`🎬 Starting ${versionKey}: ${preset.name}`);
           console.log(`   Speed: ${preset.speed}x, Saturation: ${preset.saturation}, Crop: ${preset.cropPercent}%`);
-          console.log(`   Bitrate: 20Mbps (Instagram optimized) ${is1080p ? '(No scaling - 1080p maintained)' : '(Scaling to 1080p)'}`);
+          console.log(`   Bitrate: 20Mbps (Instagram optimized) ${is1080p ? '(No scaling - optimized resolution maintained)' : `(Scaling to ${targetWidth}x${targetHeight})`}`);
         })
         .on('progress', (progress) => {
           const percent = Math.min(99, Math.floor(progress.percent || 0));
