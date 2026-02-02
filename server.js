@@ -22,6 +22,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Request logging middleware
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  next();
+});
+
 // ============================================
 // STORAGE CONFIGURATION
 // ============================================
@@ -185,7 +191,12 @@ app.post('/api/convert', upload.single('video'), async (req, res) => {
 
 // Multi-version conversion endpoint
 app.post('/api/convert-multi', upload.single('video'), async (req, res) => {
+  console.log('📥 Received conversion request');
+  console.log('   File:', req.file ? req.file.originalname : 'NO FILE');
+  console.log('   Body:', req.body);
+  
   if (!req.file) {
+    console.log('❌ No file uploaded');
     return res.status(400).json({ error: 'No video file uploaded' });
   }
 
@@ -200,6 +211,8 @@ app.post('/api/convert-multi', upload.single('video'), async (req, res) => {
 
   const jobId = `multi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const inputPath = req.file.path;
+  
+  console.log(`✅ Created job ${jobId} for ${versionCount} version(s)`);
   
   // Initialize job tracking based on version count
   const versionsToProcess = {};
@@ -663,6 +676,16 @@ setInterval(() => {
 // ============================================
 // ERROR HANDLING
 // ============================================
+
+// 404 handler - return JSON instead of HTML
+app.use((req, res, next) => {
+  res.status(404).json({ 
+    error: 'Endpoint not found',
+    path: req.path,
+    method: req.method,
+    message: 'The requested endpoint does not exist'
+  });
+});
 
 app.use((err, req, res, next) => {
   console.error('Error:', err);
