@@ -470,6 +470,9 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
 
       const width = videoStream.width;
       const height = videoStream.height;
+      const is1080p = (width === 1920 && height === 1080);
+
+      console.log(`   Input resolution: ${width}x${height} ${is1080p ? '(Already 1080p - optimized processing)' : '(Will scale to 1080p)'}`);
 
       // Calculate crop dimensions
       let cropFilter = '';
@@ -478,23 +481,29 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
         const cropH = Math.floor(height * (1 - preset.cropPercent / 100));
         const cropX = Math.floor((width - cropW) / 2);
         const cropY = Math.floor((height - cropH) / 2);
-        cropFilter = `crop=${cropW}:${cropH}:${cropX}:${cropY},scale=1920:1080`;
+        
+        // Only scale if not already 1080p
+        if (is1080p) {
+          cropFilter = `crop=${cropW}:${cropH}:${cropX}:${cropY}`;
+        } else {
+          cropFilter = `crop=${cropW}:${cropH}:${cropX}:${cropY},scale=1920:1080`;
+        }
       } else {
-        cropFilter = 'scale=1920:1080';
+        // Only scale if not already 1080p - use 'null' filter to skip scaling
+        cropFilter = is1080p ? 'null' : 'scale=1920:1080';
       }
 
       // Build filter chains
-      const videoFilters = buildVideoFilterChain(preset, cropFilter);
+      const videoFilters = buildVideoFilterChain(preset, cropFilter, is1080p);
       const audioFilters = buildAudioFilterChain(preset);
 
-      // Start FFmpeg processing
+      // Start FFmpeg processing with 20Mbps bitrate for optimal Instagram quality
       let command = ffmpeg(inputPath)
         .outputOptions([
-          '-crf 18',
+          '-b:v 20000k',
+          '-maxrate 22000k',
+          '-bufsize 44000k',
           '-preset slow',
-          '-b:v 8M',
-          '-maxrate 10M',
-          '-bufsize 16M',
           '-pix_fmt yuv420p',
           '-profile:v high',
           '-level 4.0',
@@ -521,6 +530,7 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
         .on('start', (commandLine) => {
           console.log(`🎬 Starting ${versionKey}: ${preset.name}`);
           console.log(`   Speed: ${preset.speed}x, Saturation: ${preset.saturation}, Crop: ${preset.cropPercent}%`);
+          console.log(`   Bitrate: 20Mbps (Instagram optimized) ${is1080p ? '(No scaling - 1080p maintained)' : '(Scaling to 1080p)'}`);
         })
         .on('progress', (progress) => {
           const percent = Math.min(99, Math.floor(progress.percent || 0));
@@ -553,8 +563,13 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
   });
 }
 
-function buildVideoFilterChain(preset, cropFilter) {
-  const filters = [cropFilter];
+function buildVideoFilterChain(preset, cropFilter, is1080p) {
+  const filters = [];
+  
+  // Only add crop/scale filter if it's not 'null'
+  if (cropFilter !== 'null') {
+    filters.push(cropFilter);
+  }
 
   // Color adjustments
   filters.push(`eq=saturation=${preset.saturation}:brightness=${preset.brightness}:contrast=${preset.contrast}`);
