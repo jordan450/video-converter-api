@@ -213,13 +213,22 @@ app.post('/api/video/upload', upload.single('video'), async (req, res) => {
 });
 
 // Another alias endpoint for frontend - same as /api/convert
-app.post('/api/video/process', upload.single('video'), async (req, res) => {
-  if (!req.file) {
+app.post('/api/video/process', upload.any(), async (req, res) => {
+  // Get file from either req.file or req.files
+  const uploadedFile = req.file || (req.files && req.files[0]);
+  
+  if (!uploadedFile) {
+    console.log('❌ No file uploaded to /api/video/process');
+    console.log('   req.file:', req.file);
+    console.log('   req.files:', req.files);
+    console.log('   req.body:', req.body);
     return res.status(400).json({ error: 'No video file uploaded' });
   }
 
+  console.log('✅ File received at /api/video/process:', uploadedFile.originalname);
+
   const jobId = `single_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const inputPath = req.file.path;
+  const inputPath = uploadedFile.path;
   
   jobs.set(jobId, {
     status: 'processing',
@@ -228,7 +237,7 @@ app.post('/api/video/process', upload.single('video'), async (req, res) => {
       version1: { status: 'pending', progress: 0 }
     },
     startTime: Date.now(),
-    originalFilename: req.file.originalname
+    originalFilename: uploadedFile.originalname
   });
 
   res.json({ 
