@@ -22,12 +22,6 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware
-app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  next();
-});
-
 // ============================================
 // STORAGE CONFIGURATION
 // ============================================
@@ -152,14 +146,6 @@ app.get('/', (req, res) => {
   });
 });
 
-// Health endpoint for monitoring/load balancers
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'online',
-    timestamp: new Date().toISOString()
-  });
-});
-
 // Legacy single conversion endpoint (for backward compatibility)
 app.post('/api/convert', upload.single('video'), async (req, res) => {
   if (!req.file) {
@@ -191,12 +177,7 @@ app.post('/api/convert', upload.single('video'), async (req, res) => {
 
 // Multi-version conversion endpoint
 app.post('/api/convert-multi', upload.single('video'), async (req, res) => {
-  console.log('📥 Received conversion request');
-  console.log('   File:', req.file ? req.file.originalname : 'NO FILE');
-  console.log('   Body:', req.body);
-  
   if (!req.file) {
-    console.log('❌ No file uploaded');
     return res.status(400).json({ error: 'No video file uploaded' });
   }
 
@@ -212,8 +193,6 @@ app.post('/api/convert-multi', upload.single('video'), async (req, res) => {
   const jobId = `multi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const inputPath = req.file.path;
   
-  console.log(`✅ Created job ${jobId} for ${versionCount} version(s)`);
-  
   // Initialize job tracking based on version count
   const versionsToProcess = {};
   const versionKeys = Object.keys(VERSION_PRESETS).slice(0, versionCount);
@@ -231,141 +210,6 @@ app.post('/api/convert-multi', upload.single('video'), async (req, res) => {
     versions: versionsToProcess,
     startTime: Date.now(),
     originalFilename: req.file.originalname
-  });
-
-  res.json({ 
-    jobId, 
-    message: `Processing started for ${versionCount} version${versionCount > 1 ? 's' : ''}`,
-    versionCount,
-    estimatedTime: versionCount === 1 ? '1-2 minutes' : `${versionCount}-${versionCount + 2} minutes`
-  });
-
-  // Process selected versions
-  processMultipleVersions(inputPath, jobId, versionKeys);
-});
-
-// Alternative endpoint that frontend might be using
-app.post('/api/video/upload', upload.single('video'), async (req, res) => {
-  console.log('📥 Received video upload request (via /api/video/upload)');
-  console.log('   File:', req.file ? req.file.originalname : 'NO FILE');
-  console.log('   Body:', req.body);
-  
-  if (!req.file) {
-    console.log('❌ No file uploaded');
-    return res.status(400).json({ error: 'No video file uploaded' });
-  }
-
-  // Get number of versions from request body (default to 1)
-  const versionCount = parseInt(req.body.versionCount) || parseInt(req.body.versions) || 1;
-  
-  if (versionCount < 1 || versionCount > 5) {
-    return res.status(400).json({ 
-      error: 'Invalid version count. Must be between 1 and 5.' 
-    });
-  }
-
-  const jobId = `multi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const inputPath = req.file.path;
-  
-  console.log(`✅ Created job ${jobId} for ${versionCount} version(s)`);
-  
-  // Initialize job tracking based on version count
-  const versionsToProcess = {};
-  const versionKeys = Object.keys(VERSION_PRESETS).slice(0, versionCount);
-  
-  versionKeys.forEach(key => {
-    versionsToProcess[key] = { 
-      status: 'pending', 
-      progress: 0 
-    };
-  });
-
-  jobs.set(jobId, {
-    status: 'processing',
-    versionCount,
-    versions: versionsToProcess,
-    startTime: Date.now(),
-    originalFilename: req.file.originalname
-  });
-
-  res.json({ 
-    jobId, 
-    message: `Processing started for ${versionCount} version${versionCount > 1 ? 's' : ''}`,
-    versionCount,
-    estimatedTime: versionCount === 1 ? '1-2 minutes' : `${versionCount}-${versionCount + 2} minutes`
-  });
-
-  // Process selected versions
-  processMultipleVersions(inputPath, jobId, versionKeys);
-});
-
-// Another alternative endpoint - /api/video/process
-app.post('/api/video/process', upload.any(), async (req, res) => {
-  console.log('========================================');
-  console.log('📥 VIDEO PROCESS REQUEST RECEIVED');
-  console.log('========================================');
-  console.log('Headers:', JSON.stringify(req.headers, null, 2));
-  console.log('Content-Type:', req.headers['content-type']);
-  console.log('Body:', JSON.stringify(req.body, null, 2));
-  console.log('Files (array):', req.files);
-  console.log('File (single):', req.file);
-  console.log('========================================');
-  
-  // Get the file from either req.file or req.files
-  const uploadedFile = req.file || (req.files && req.files[0]);
-  
-  if (!uploadedFile) {
-    console.log('❌ NO FILE FOUND IN REQUEST');
-    console.log('   req.file is:', req.file);
-    console.log('   req.files is:', req.files);
-    console.log('   req.body is:', req.body);
-    return res.status(400).json({ 
-      error: 'No video file uploaded',
-      debug: {
-        hasFile: !!req.file,
-        hasFiles: !!(req.files && req.files.length),
-        bodyKeys: Object.keys(req.body)
-      }
-    });
-  }
-
-  console.log('✅ FILE RECEIVED:');
-  console.log('   Name:', uploadedFile.originalname);
-  console.log('   Size:', uploadedFile.size, 'bytes');
-  console.log('   Type:', uploadedFile.mimetype);
-  console.log('   Path:', uploadedFile.path);
-
-  // Get number of versions from request body (default to 1)
-  const versionCount = parseInt(req.body.versionCount) || parseInt(req.body.versions) || 1;
-  
-  if (versionCount < 1 || versionCount > 5) {
-    return res.status(400).json({ 
-      error: 'Invalid version count. Must be between 1 and 5.' 
-    });
-  }
-
-  const jobId = `multi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const inputPath = uploadedFile.path;
-  
-  console.log(`✅ Created job ${jobId} for ${versionCount} version(s)`);
-  
-  // Initialize job tracking based on version count
-  const versionsToProcess = {};
-  const versionKeys = Object.keys(VERSION_PRESETS).slice(0, versionCount);
-  
-  versionKeys.forEach(key => {
-    versionsToProcess[key] = { 
-      status: 'pending', 
-      progress: 0 
-    };
-  });
-
-  jobs.set(jobId, {
-    status: 'processing',
-    versionCount,
-    versions: versionsToProcess,
-    startTime: Date.now(),
-    originalFilename: uploadedFile.originalname
   });
 
   res.json({ 
@@ -645,15 +489,15 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
           cropFilter = `crop=${cropW}:${cropH}:${cropX}:${cropY},scale=1920:1080`;
         }
       } else {
-        // Only scale if not already 1080p - use 'null' filter to skip scaling
+        // Only scale if not already 1080p
         cropFilter = is1080p ? 'null' : 'scale=1920:1080';
       }
 
       // Build filter chains
-      const videoFilters = buildVideoFilterChain(preset, cropFilter, is1080p);
+      const videoFilters = buildVideoFilterChain(preset, cropFilter);
       const audioFilters = buildAudioFilterChain(preset);
 
-      // Start FFmpeg processing with 20Mbps bitrate for optimal Instagram quality
+      // Start FFmpeg processing with 20Mbps bitrate for Instagram optimization
       let command = ffmpeg(inputPath)
         .outputOptions([
           '-b:v 20000k',
@@ -719,7 +563,7 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
   });
 }
 
-function buildVideoFilterChain(preset, cropFilter, is1080p) {
+function buildVideoFilterChain(preset, cropFilter) {
   const filters = [];
   
   // Only add crop/scale filter if it's not 'null'
@@ -811,16 +655,6 @@ setInterval(() => {
 // ============================================
 // ERROR HANDLING
 // ============================================
-
-// 404 handler - return JSON instead of HTML
-app.use((req, res, next) => {
-  res.status(404).json({ 
-    error: 'Endpoint not found',
-    path: req.path,
-    method: req.method,
-    message: 'The requested endpoint does not exist'
-  });
-});
 
 app.use((err, req, res, next) => {
   console.error('Error:', err);
