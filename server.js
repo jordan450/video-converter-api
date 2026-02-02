@@ -1,6 +1,6 @@
 // ============================================
 // MULTI-VERSION VIDEO CONVERTER SERVER
-// Complete server.js for Railway deployment
+// Complete server.js - Optimized for Mixpost
 // ============================================
 
 const express = require('express');
@@ -10,6 +10,8 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const archiver = require('archiver');
+const FormData = require('form-data');
+const fetch = require('node-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -26,7 +28,6 @@ app.use(express.urlencoded({ extended: true }));
 // STORAGE CONFIGURATION
 // ============================================
 
-// Ensure directories exist
 const dirs = ['uploads', 'processed/videos', 'processed/images', 'processed/audio'];
 dirs.forEach(dir => {
   if (!fs.existsSync(dir)) {
@@ -34,7 +35,6 @@ dirs.forEach(dir => {
   }
 });
 
-// Multer storage configuration
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/');
@@ -47,7 +47,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB limit
+  limits: { fileSize: 500 * 1024 * 1024 }, // 500MB
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/x-matroska', 'video/webm'];
     if (file.mimetype.startsWith('video/') || allowedTypes.includes(file.mimetype)) {
@@ -59,224 +59,44 @@ const upload = multer({
 });
 
 // ============================================
-// JOB TRACKING
+// JOB TRACKING & PRESETS
 // ============================================
 
 const jobs = new Map();
 
-// ============================================
-// VERSION PRESETS
-// ============================================
-
 const VERSION_PRESETS = {
-  version1: {
-    name: "Original Enhanced",
-    speed: 1.0,
-    saturation: 1.1,
-    brightness: 0.02,
-    contrast: 1.05,
-    audioPitch: 0,
-    cropPercent: 0,
-    description: "Slightly enhanced colors and contrast"
-  },
-  version2: {
-    name: "Warm & Slower",
-    speed: 0.85,
-    saturation: 1.25,
-    brightness: 0.05,
-    contrast: 1.1,
-    audioPitch: -2,
-    cropPercent: 3,
-    colorTemp: "warm",
-    description: "Warmer tones, 15% slower, zoomed in"
-  },
-  version3: {
-    name: "Cool & Crisp",
-    speed: 1.15,
-    saturation: 0.9,
-    brightness: -0.03,
-    contrast: 1.15,
-    audioPitch: 2,
-    cropPercent: 5,
-    colorTemp: "cool",
-    sharpen: 1.2,
-    description: "Cooler tones, 15% faster, sharpened"
-  },
-  version4: {
-    name: "Vibrant Motion",
-    speed: 0.9,
-    saturation: 1.4,
-    brightness: 0.08,
-    contrast: 1.2,
-    audioPitch: -1,
-    cropPercent: 7,
-    vignette: true,
-    description: "High saturation, 10% slower, vignette effect"
-  },
-  version5: {
-    name: "Subtle Shift",
-    speed: 1.05,
-    saturation: 1.05,
-    brightness: 0.01,
-    contrast: 1.08,
-    audioPitch: 1,
-    cropPercent: 2,
-    gaussianBlur: 0.3,
-    description: "Minimal changes, slight repositioning"
-  }
+  version1: { name: "Original Enhanced", speed: 1.0, saturation: 1.1, brightness: 0.02, contrast: 1.05, audioPitch: 0, cropPercent: 0, description: "Slightly enhanced colors and contrast" },
+  version2: { name: "Warm & Slower", speed: 0.85, saturation: 1.25, brightness: 0.05, contrast: 1.1, audioPitch: -2, cropPercent: 3, colorTemp: "warm", description: "Warmer tones, 15% slower, zoomed in" },
+  version3: { name: "Cool & Crisp", speed: 1.15, saturation: 0.9, brightness: -0.03, contrast: 1.15, audioPitch: 2, cropPercent: 5, colorTemp: "cool", sharpen: 1.2, description: "Cooler tones, 15% faster, sharpened" },
+  version4: { name: "Vibrant Motion", speed: 0.9, saturation: 1.4, brightness: 0.08, contrast: 1.2, audioPitch: -1, cropPercent: 7, vignette: true, description: "High saturation, 10% slower, vignette effect" },
+  version5: { name: "Subtle Shift", speed: 1.05, saturation: 1.05, brightness: 0.01, contrast: 1.08, audioPitch: 1, cropPercent: 2, gaussianBlur: 0.3, description: "Minimal changes, slight repositioning" }
 };
 
 // ============================================
 // ROUTES
 // ============================================
 
-// Health check
 app.get('/', (req, res) => {
-  res.json({ 
-    status: 'online', 
-    service: 'Multi-Version Video Converter API',
-    version: '2.0.0',
-    endpoints: {
-      convert: '/api/convert',
-      convertMulti: '/api/convert-multi',
-      status: '/api/job/:jobId',
-      download: '/api/download/:jobId/:versionKey',
-      downloadAll: '/api/download-all/:jobId'
-    }
-  });
+  res.json({ status: 'online', service: 'Video Converter API', version: '2.1.0' });
 });
 
-// Health endpoint for frontend checks
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'online',
-    timestamp: new Date().toISOString()
-  });
+  res.json({ status: 'online', timestamp: new Date().toISOString() });
 });
 
-// Legacy single conversion endpoint (for backward compatibility)
-app.post('/api/convert', upload.single('video'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No video file uploaded' });
-  }
-
-  const jobId = `single_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const inputPath = req.file.path;
-  
-  jobs.set(jobId, {
-    status: 'processing',
-    versionCount: 1,
-    versions: {
-      version1: { status: 'pending', progress: 0 }
-    },
-    startTime: Date.now(),
-    originalFilename: req.file.originalname
-  });
-
-  res.json({ 
-    jobId, 
-    message: 'Processing started',
-    versionCount: 1,
-    estimatedTime: '1-2 minutes'
-  });
-
-  processMultipleVersions(inputPath, jobId, ['version1']);
-});
-
-// Alias endpoint for frontend - same as /api/convert
-app.post('/api/video/upload', upload.single('video'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No video file uploaded' });
-  }
-
-  const jobId = `single_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const inputPath = req.file.path;
-  
-  jobs.set(jobId, {
-    status: 'processing',
-    versionCount: 1,
-    versions: {
-      version1: { status: 'pending', progress: 0 }
-    },
-    startTime: Date.now(),
-    originalFilename: req.file.originalname
-  });
-
-  res.json({ 
-    jobId, 
-    message: 'Processing started',
-    versionCount: 1,
-    estimatedTime: '1-2 minutes'
-  });
-
-  processMultipleVersions(inputPath, jobId, ['version1']);
-});
-
-// Another alias endpoint for frontend - same as /api/convert
-app.post('/api/video/process', upload.any(), async (req, res) => {
-  // Get file from either req.file or req.files
-  const uploadedFile = req.file || (req.files && req.files[0]);
-  
-  if (!uploadedFile) {
-    console.log('❌ No file uploaded to /api/video/process');
-    console.log('   req.file:', req.file);
-    console.log('   req.files:', req.files);
-    console.log('   req.body:', req.body);
-    return res.status(400).json({ error: 'No video file uploaded' });
-  }
-
-  console.log('✅ File received at /api/video/process:', uploadedFile.originalname);
-
-  const jobId = `single_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const inputPath = uploadedFile.path;
-  
-  jobs.set(jobId, {
-    status: 'processing',
-    versionCount: 1,
-    versions: {
-      version1: { status: 'pending', progress: 0 }
-    },
-    startTime: Date.now(),
-    originalFilename: uploadedFile.originalname
-  });
-
-  res.json({ 
-    jobId, 
-    message: 'Processing started',
-    versionCount: 1,
-    estimatedTime: '1-2 minutes'
-  });
-
-  processMultipleVersions(inputPath, jobId, ['version1']);
-});
-
-// Multi-version conversion endpoint
+// Main Conversion Endpoint
 app.post('/api/convert-multi', upload.single('video'), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No video file uploaded' });
-  }
+  if (!req.file) return res.status(400).json({ error: 'No video file uploaded' });
 
-  // Get number of versions from request body (default to 1)
-  const versionCount = parseInt(req.body.versionCount) || 1;
-  
-  if (versionCount < 1 || versionCount > 5) {
-    return res.status(400).json({ 
-      error: 'Invalid version count. Must be between 1 and 5.' 
-    });
-  }
-
+  const versionCount = Math.min(Math.max(parseInt(req.body.versionCount) || 1, 1), 5);
   const jobId = `multi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   const inputPath = req.file.path;
   
-  // Initialize job tracking based on version count
   const versionsToProcess = {};
   const versionKeys = Object.keys(VERSION_PRESETS).slice(0, versionCount);
   
   versionKeys.forEach(key => {
-    versionsToProcess[key] = { 
-      status: 'pending', 
-      progress: 0 
-    };
+    versionsToProcess[key] = { status: 'pending', progress: 0 };
   });
 
   jobs.set(jobId, {
@@ -287,72 +107,47 @@ app.post('/api/convert-multi', upload.single('video'), async (req, res) => {
     originalFilename: req.file.originalname
   });
 
-  res.json({ 
-    jobId, 
-    message: `Processing started for ${versionCount} version${versionCount > 1 ? 's' : ''}`,
-    versionCount,
-    estimatedTime: versionCount === 1 ? '1-2 minutes' : `${versionCount}-${versionCount + 2} minutes`
-  });
-
-  // Process selected versions
+  res.json({ jobId, message: 'Processing started', versionCount });
   processMultipleVersions(inputPath, jobId, versionKeys);
 });
 
-// Job status endpoint
-app.get('/api/job/:jobId', (req, res) => {
-  const job = jobs.get(req.params.jobId);
-  
-  if (!job) {
-    return res.status(404).json({ error: 'Job not found' });
-  }
+// Legacy/Frontend Compatibility Aliases
+app.post(['/api/convert', '/api/video/upload', '/api/video/process'], upload.any(), (req, res) => {
+  const file = req.file || (req.files && req.files[0]);
+  if (!file) return res.status(400).json({ error: 'No video file uploaded' });
 
-  // Calculate overall progress
-  const versionProgresses = Object.values(job.versions).map(v => v.progress || 0);
-  const overallProgress = Math.floor(
-    versionProgresses.reduce((a, b) => a + b, 0) / versionProgresses.length
-  );
-
-  res.json({
-    jobId: req.params.jobId,
-    status: job.status,
-    versionCount: job.versionCount || 1,
-    overallProgress,
-    versions: job.versions,
-    originalFilename: job.originalFilename,
-    processingDuration: job.processingDuration ? 
-      Math.floor(job.processingDuration / 1000) + 's' : null
+  const jobId = `single_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  jobs.set(jobId, {
+    status: 'processing',
+    versionCount: 1,
+    versions: { version1: { status: 'pending', progress: 0 } },
+    startTime: Date.now(),
+    originalFilename: file.originalname
   });
+
+  res.json({ jobId, message: 'Processing started' });
+  processMultipleVersions(file.path, jobId, ['version1']);
 });
 
-// Alias for frontend compatibility
-app.get('/api/video/status/:jobId', (req, res) => {
+// Job Status
+app.get(['/api/job/:jobId', '/api/video/status/:jobId'], (req, res) => {
   const job = jobs.get(req.params.jobId);
-  
-  if (!job) {
-    return res.status(404).json({ error: 'Job not found' });
-  }
+  if (!job) return res.status(404).json({ error: 'Job not found' });
 
-  // Calculate overall progress
   const versionProgresses = Object.values(job.versions).map(v => v.progress || 0);
-  const overallProgress = Math.floor(
-    versionProgresses.reduce((a, b) => a + b, 0) / versionProgresses.length
-  );
+  const overallProgress = Math.floor(versionProgresses.reduce((a, b) => a + b, 0) / versionProgresses.length);
 
-  // Frontend expects 'active' instead of 'processing'
-  const frontendStatus = job.status === 'processing' ? 'active' : job.status;
-
-  // Format response for frontend
   res.json({
     jobId: req.params.jobId,
-    status: frontendStatus,
+    status: job.status === 'processing' ? 'active' : job.status,
     progress: overallProgress,
-    data: job.status === 'completed' && job.versions.version1 ? [{
-      id: 'version1',
-      name: job.versions.version1.filename,
-      downloadUrl: `/api/download/${req.params.jobId}/version1`,
-      size: job.versions.version1.sizeReadable
-    }] : undefined,
-    error: job.error
+    versions: job.versions,
+    data: job.status === 'completed' ? Object.keys(job.versions).map(key => ({
+      id: key,
+      name: job.versions[key].filename,
+      downloadUrl: `/api/download/${req.params.jobId}/${key}`,
+      size: job.versions[key].sizeReadable
+    })) : undefined
   });
 });
 
@@ -360,193 +155,42 @@ app.get('/api/video/status/:jobId', (req, res) => {
 app.get('/api/download/:jobId/:versionKey', (req, res) => {
   const { jobId, versionKey } = req.params;
   const job = jobs.get(jobId);
-  
-  if (!job || !job.versions[versionKey]) {
-    return res.status(404).json({ error: 'Version not found' });
-  }
+  if (!job || !job.versions[versionKey]) return res.status(404).json({ error: 'Version not found' });
 
   const version = job.versions[versionKey];
-  
-  if (version.status !== 'completed') {
-    return res.status(400).json({ error: 'Version not ready' });
-  }
-
   const filePath = path.join('processed', 'videos', version.filename);
   
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'File not found' });
-  }
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
 
-  const downloadName = job.versionCount === 1 
-    ? `${path.parse(job.originalFilename).name}_converted.mp4`
-    : `${path.parse(job.originalFilename).name}_${versionKey}.mp4`;
-  
-  res.download(filePath, downloadName, (err) => {
-    if (err) {
-      console.error('Download error:', err);
-      if (!res.headersSent) {
-        res.status(500).json({ error: 'Download failed' });
-      }
-    }
-  });
+  res.download(filePath, `${path.parse(job.originalFilename).name}_${versionKey}.mp4`);
 });
 
-// Download all versions as ZIP
-app.get('/api/download-all/:jobId', async (req, res) => {
-  const job = jobs.get(req.params.jobId);
-  
-  if (!job) {
-    return res.status(404).json({ error: 'Job not found' });
-  }
+// ============================================
+// MIXPOST UPLOAD (The Corrected Part)
+// ============================================
 
-  if (job.status !== 'completed') {
-    return res.status(400).json({ error: 'Not all versions ready' });
-  }
-
-  // If only 1 version, redirect to single download
-  if (job.versionCount === 1) {
-    const versionKey = Object.keys(job.versions)[0];
-    return res.redirect(`/api/download/${req.params.jobId}/${versionKey}`);
-  }
-
-  // Create ZIP for multiple versions
-  const archive = archiver('zip', { zlib: { level: 9 } });
-  
-  const zipName = `${path.parse(job.originalFilename).name}_${job.versionCount}_versions.zip`;
-  
-  res.attachment(zipName);
-  
-  archive.on('error', (err) => {
-    console.error('Archive error:', err);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Failed to create ZIP' });
-    }
-  });
-
-  archive.pipe(res);
-
-  // Add all completed versions to ZIP
-  for (const [versionKey, version] of Object.entries(job.versions)) {
-    if (version.status === 'completed') {
-      const filePath = path.join('processed', 'videos', version.filename);
-      if (fs.existsSync(filePath)) {
-        archive.file(filePath, { 
-          name: `${versionKey}_${VERSION_PRESETS[versionKey].name}.mp4` 
-        });
-      }
-    }
-  }
-
-  archive.finalize();
-});
-
-// Upload to Mixpost endpoint
-app.post('/api/upload-to-mixpost', async (req, res) => {
-  const { jobId, versionKey, mixpostUrl, mixpostToken } = req.body;
-  
-  if (!jobId || !versionKey || !mixpostUrl || !mixpostToken) {
-    return res.status(400).json({ error: 'Missing required parameters' });
-  }
-
-  const job = jobs.get(jobId);
-  
-  if (!job || !job.versions[versionKey]) {
-    return res.status(404).json({ error: 'Version not found' });
-  }
-
-  const version = job.versions[versionKey];
-  
-  if (version.status !== 'completed') {
-    return res.status(400).json({ error: 'Version not ready' });
-  }
-
-  const filePath = path.join('processed', 'videos', version.filename);
-  
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'File not found' });
-  }
-
-  try {
-    const FormData = require('form-data');
-    const fetch = require('node-fetch');
-    
-    const formData = new FormData();
-    formData.append('file', fs.createReadStream(filePath));
-    formData.append('name', `${job.originalFilename}_${versionKey}`);
-
-    const response = await fetch(`${mixpostUrl}/api/media`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${mixpostToken}`,
-        ...formData.getHeaders()
-      },
-      body: formData
-    });
-
-    const data = await response.json();
-
-    if (response.ok) {
-      console.log(`✅ Successfully uploaded ${versionKey} to Mixpost`);
-      res.json({ 
-        success: true, 
-        message: 'Uploaded to Mixpost successfully',
-        mixpostResponse: data 
-      });
-    } else {
-      console.error(`❌ Mixpost upload failed:`, data);
-      res.status(response.status).json({ 
-        error: 'Mixpost upload failed', 
-        details: data 
-      });
-    }
-  } catch (error) {
-    console.error('Mixpost upload error:', error);
-    res.status(500).json({ 
-      error: 'Failed to upload to Mixpost', 
-      details: error.message 
-    });
-  }
-});
-
-// Frontend-compatible Mixpost upload endpoint
 app.post('/api/mixpost/upload', async (req, res) => {
-  console.log('📤 Mixpost upload request received');
-  console.log('   Body:', req.body);
-  
   const { filename, workspaceId } = req.body;
   
   if (!filename || !workspaceId) {
-    console.log('❌ Missing parameters:', { filename, workspaceId });
     return res.status(400).json({ error: 'Missing filename or workspaceId' });
   }
 
   const filePath = path.join('processed', 'videos', filename);
-  console.log('   Looking for file:', filePath);
-  
   if (!fs.existsSync(filePath)) {
-    console.log('❌ File not found:', filePath);
-    console.log('   Files in processed/videos:', fs.readdirSync('processed/videos'));
-    return res.status(404).json({ error: 'File not found' });
+    return res.status(404).json({ error: 'File not found on server' });
   }
 
-  console.log('✅ File found, uploading to Mixpost...');
-
   try {
-    const FormData = require('form-data');
-    const fetch = require('node-fetch');
-    
     const formData = new FormData();
     formData.append('file', fs.createReadStream(filePath));
-    formData.append('name', path.parse(filename).name);
 
-    // Mixpost API endpoint - simplified format
-    const mixpostUrl = `https://autoposter.typamanagement.com/api/media`;
+    // Mixpost API: https://domain.com/api/<workspaceUuid>/media
+    const mixpostBaseUrl = 'https://autoposter.typamanagement.com';
+    const uploadUrl = `${mixpostBaseUrl}/api/${workspaceId}/media`;
     const mixpostToken = 'kuWpPvLYPVdLX7c1qA3MmMFozHugLkO1U7KWl8vs6b4e64e1';
-    
-    console.log('   Uploading to:', mixpostUrl);
-    console.log('   With workspace:', workspaceId);
-    
-    const response = await fetch(mixpostUrl, {
+
+    const response = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${mixpostToken}`,
@@ -555,76 +199,34 @@ app.post('/api/mixpost/upload', async (req, res) => {
       body: formData
     });
 
-    console.log('   Mixpost response status:', response.status);
-    
     const data = await response.json();
-    console.log('   Mixpost response data:', data);
 
     if (response.ok) {
-      console.log(`✅ Successfully uploaded ${filename} to Mixpost workspace ${workspaceId}`);
-      res.json({ 
-        success: true, 
-        message: 'Uploaded to Mixpost successfully',
-        mediaId: data.id || data.media_id,
-        mixpostResponse: data 
-      });
+      res.json({ success: true, message: 'Uploaded to Mixpost successfully', data });
     } else {
-      console.error(`❌ Mixpost upload failed:`, data);
-      res.status(response.status).json({ 
-        error: 'Mixpost upload failed', 
-        details: data 
-      });
+      res.status(response.status).json({ error: 'Mixpost upload failed', details: data });
     }
   } catch (error) {
-    console.error('❌ Mixpost upload error:', error);
-    console.error('   Error stack:', error.stack);
-    res.status(500).json({ 
-      error: 'Failed to upload to Mixpost', 
-      details: error.message 
-    });
+    res.status(500).json({ error: 'Failed to upload to Mixpost', details: error.message });
   }
 });
 
 // ============================================
-// PROCESSING FUNCTIONS
+// PROCESSING LOGIC
 // ============================================
 
 async function processMultipleVersions(inputPath, jobId, versionKeys) {
   const job = jobs.get(jobId);
-  
   try {
-    console.log(`🎬 Starting processing for job ${jobId} - ${versionKeys.length} version(s)`);
-    
-    // Process selected versions in parallel
-    const versionPromises = versionKeys.map(versionKey => 
-      processVersionVariation(inputPath, jobId, versionKey)
-    );
-
+    const versionPromises = versionKeys.map(versionKey => processVersionVariation(inputPath, jobId, versionKey));
     await Promise.all(versionPromises);
-
-    // Update job status
     job.status = 'completed';
     job.completedTime = Date.now();
-    job.processingDuration = job.completedTime - job.startTime;
-
-    console.log(`✅ All ${versionKeys.length} version(s) completed for job ${jobId} in ${Math.floor(job.processingDuration / 1000)}s`);
-
   } catch (error) {
-    console.error(`❌ Processing failed for job ${jobId}:`, error);
     job.status = 'failed';
     job.error = error.message;
   } finally {
-    // Cleanup original file
-    setTimeout(() => {
-      try {
-        if (fs.existsSync(inputPath)) {
-          fs.unlinkSync(inputPath);
-          console.log(`🗑️ Cleaned up original file for job ${jobId}`);
-        }
-      } catch (err) {
-        console.error('Cleanup error:', err);
-      }
-    }, 1000);
+    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
   }
 }
 
@@ -634,261 +236,61 @@ async function processVersionVariation(inputPath, jobId, versionKey) {
   const outputFilename = `${jobId}_${versionKey}.mp4`;
   const outputPath = path.join('processed', 'videos', outputFilename);
 
-  job.versions[versionKey].status = 'processing';
-  
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(inputPath, (err, metadata) => {
-      if (err) {
-        job.versions[versionKey].status = 'failed';
-        job.versions[versionKey].error = err.message;
-        return reject(err);
-      }
-
+      if (err) return reject(err);
+      
       const videoStream = metadata.streams.find(s => s.codec_type === 'video');
-      if (!videoStream) {
-        const error = new Error('No video stream found');
-        job.versions[versionKey].status = 'failed';
-        job.versions[versionKey].error = error.message;
-        return reject(error);
-      }
+      const { width, height } = videoStream;
+      const targetW = height > width ? 1080 : 1920;
+      const targetH = height > width ? 1920 : 1080;
 
-      const width = videoStream.width;
-      const height = videoStream.height;
-      const isPortrait = height > width;
-      const isLandscape = width > height;
-      const isSquare = width === height;
-      
-      // Check if already at target resolution
-      let is1080p = false;
-      let targetWidth, targetHeight;
-      
-      if (isPortrait) {
-        // Portrait: height should be 1920
-        is1080p = (height === 1920 && width === 1080);
-        targetWidth = 1080;
-        targetHeight = 1920;
-      } else if (isLandscape) {
-        // Landscape: width should be 1920
-        is1080p = (width === 1920 && height === 1080);
-        targetWidth = 1920;
-        targetHeight = 1080;
-      } else {
-        // Square: 1080x1080
-        is1080p = (width === 1080 && height === 1080);
-        targetWidth = 1080;
-        targetHeight = 1080;
-      }
-
-      console.log(`   Input resolution: ${width}x${height} ${isPortrait ? '(Portrait)' : isLandscape ? '(Landscape)' : '(Square)'} ${is1080p ? '(Already optimized - no scaling needed)' : `(Will scale to ${targetWidth}x${targetHeight})`}`);
-
-      // Calculate crop dimensions
-      let cropFilter = '';
+      const filters = [];
       if (preset.cropPercent > 0) {
-        const cropW = Math.floor(width * (1 - preset.cropPercent / 100));
-        const cropH = Math.floor(height * (1 - preset.cropPercent / 100));
-        const cropX = Math.floor((width - cropW) / 2);
-        const cropY = Math.floor((height - cropH) / 2);
-        
-        // Only scale if not already at target resolution
-        if (is1080p) {
-          cropFilter = `crop=${cropW}:${cropH}:${cropX}:${cropY}`;
-        } else {
-          cropFilter = `crop=${cropW}:${cropH}:${cropX}:${cropY},scale=${targetWidth}:${targetHeight}`;
-        }
+        const cW = Math.floor(width * (1 - preset.cropPercent / 100));
+        const cH = Math.floor(height * (1 - preset.cropPercent / 100));
+        filters.push(`crop=${cW}:${cH},scale=${targetW}:${targetH}`);
       } else {
-        // Only scale if not already at target resolution
-        cropFilter = is1080p ? 'null' : `scale=${targetWidth}:${targetHeight}`;
+        filters.push(`scale=${targetW}:${targetH}`);
       }
 
-      // Build filter chains
-      const videoFilters = buildVideoFilterChain(preset, cropFilter);
-      const audioFilters = buildAudioFilterChain(preset);
+      filters.push(`eq=saturation=${preset.saturation}:brightness=${preset.brightness}:contrast=${preset.contrast}`);
+      if (preset.colorTemp === 'warm') filters.push('colortemperature=temperature=6500:mix=0.3');
+      if (preset.sharpen) filters.push(`unsharp=5:5:${preset.sharpen}:5:5:0.0`);
 
-      // Start FFmpeg processing with 20Mbps bitrate for Instagram optimization
       let command = ffmpeg(inputPath)
-        .outputOptions([
-          '-b:v 20000k',
-          '-maxrate 22000k',
-          '-bufsize 44000k',
-          '-preset slow',
-          '-pix_fmt yuv420p',
-          '-profile:v high',
-          '-level 4.0',
-          '-b:a 192k',
-          '-ar 48000',
-          '-ac 2',
-          '-movflags +faststart',
-          '-avoid_negative_ts make_zero',
-          '-max_muxing_queue_size 1024'
-        ])
-        .videoFilters(videoFilters)
-        .audioFilters(audioFilters);
+        .outputOptions(['-b:v 15000k', '-preset fast', '-pix_fmt yuv420p', '-movflags +faststart'])
+        .videoFilters(filters.join(','));
 
-      // Apply speed change if needed
       if (preset.speed !== 1.0) {
-        // Video speed
-        command.outputOptions(`-filter:v setpts=${(1/preset.speed).toFixed(2)}*PTS`);
-        // Audio speed (maintain pitch)
-        command.outputOptions(`-filter:a atempo=${preset.speed.toFixed(2)}`);
+        command.outputOptions([`-filter:v setpts=${(1/preset.speed).toFixed(2)}*PTS`, `-filter:a atempo=${preset.speed.toFixed(2)}`]);
       }
 
-      command
-        .output(outputPath)
-        .on('start', (commandLine) => {
-          console.log(`🎬 Starting ${versionKey}: ${preset.name}`);
-          console.log(`   Speed: ${preset.speed}x, Saturation: ${preset.saturation}, Crop: ${preset.cropPercent}%`);
-          console.log(`   Bitrate: 20Mbps (Instagram optimized) ${is1080p ? '(No scaling - optimized resolution maintained)' : `(Scaling to ${targetWidth}x${targetHeight})`}`);
-        })
-        .on('progress', (progress) => {
-          const percent = Math.min(99, Math.floor(progress.percent || 0));
-          job.versions[versionKey].progress = percent;
-          
-          if (percent % 25 === 0 && percent > 0) {
-            console.log(`   ${versionKey}: ${percent}%`);
-          }
-        })
+      command.output(outputPath)
+        .on('progress', (p) => { job.versions[versionKey].progress = Math.floor(p.percent || 0); })
         .on('end', () => {
           const stats = fs.statSync(outputPath);
-          job.versions[versionKey].status = 'completed';
-          job.versions[versionKey].progress = 100;
-          job.versions[versionKey].filename = outputFilename;
-          job.versions[versionKey].size = stats.size;
-          job.versions[versionKey].sizeReadable = formatBytes(stats.size);
-          job.versions[versionKey].description = preset.description;
-          
-          console.log(`✅ ${versionKey} completed: ${formatBytes(stats.size)}`);
+          job.versions[versionKey] = { status: 'completed', progress: 100, filename: outputFilename, sizeReadable: (stats.size / 1024 / 1024).toFixed(2) + ' MB' };
           resolve();
         })
-        .on('error', (err) => {
-          console.error(`❌ ${versionKey} failed:`, err.message);
-          job.versions[versionKey].status = 'failed';
-          job.versions[versionKey].error = err.message;
-          reject(err);
-        })
+        .on('error', reject)
         .run();
     });
   });
 }
 
-function buildVideoFilterChain(preset, cropFilter) {
-  const filters = [];
-  
-  // Only add crop/scale filter if it's not 'null'
-  if (cropFilter !== 'null') {
-    filters.push(cropFilter);
-  }
-
-  // Color adjustments
-  filters.push(`eq=saturation=${preset.saturation}:brightness=${preset.brightness}:contrast=${preset.contrast}`);
-
-  // Color temperature
-  if (preset.colorTemp === 'warm') {
-    filters.push('colortemperature=temperature=6500:mix=0.3');
-  } else if (preset.colorTemp === 'cool') {
-    filters.push('colortemperature=temperature=8500:mix=0.3');
-  }
-
-  // Sharpening
-  if (preset.sharpen) {
-    filters.push(`unsharp=5:5:${preset.sharpen}:5:5:0.0`);
-  }
-
-  // Subtle blur
-  if (preset.gaussianBlur) {
-    filters.push(`gblur=sigma=${preset.gaussianBlur}`);
-  }
-
-  // Vignette effect
-  if (preset.vignette) {
-    filters.push('vignette=angle=PI/4');
-  }
-
-  return filters.join(',');
-}
-
-function buildAudioFilterChain(preset) {
-  const filters = [];
-
-  // Audio pitch shift
-  if (preset.audioPitch !== 0) {
-    const semitones = preset.audioPitch;
-    filters.push(`asetrate=48000*2^(${semitones}/12),aresample=48000`);
-  }
-
-  // Audio normalization
-  filters.push('loudnorm=I=-16:TP=-1.5:LRA=11');
-
-  return filters.join(',');
-}
-
-function formatBytes(bytes) {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
-}
-
-// ============================================
-// CLEANUP JOB
-// ============================================
-
+// Cleanup: Delete files older than 1 hour
 setInterval(() => {
   const now = Date.now();
-  const CLEANUP_AGE = 60 * 60 * 1000; // 1 hour
-  
   for (const [jobId, job] of jobs.entries()) {
-    if (job.completedTime && (now - job.completedTime > CLEANUP_AGE)) {
-      // Delete files
-      for (const version of Object.values(job.versions)) {
-        if (version.filename) {
-          const filePath = path.join('processed', 'videos', version.filename);
-          try {
-            if (fs.existsSync(filePath)) {
-              fs.unlinkSync(filePath);
-            }
-          } catch (err) {
-            console.error('Cleanup error:', err);
-          }
-        }
-      }
-      // Remove job from memory
+    if (job.completedTime && (now - job.completedTime > 3600000)) {
+      Object.values(job.versions).forEach(v => {
+        const p = path.join('processed', 'videos', v.filename || '');
+        if (fs.existsSync(p)) fs.unlinkSync(p);
+      });
       jobs.delete(jobId);
-      console.log(`🗑️ Cleaned up job ${jobId}`);
     }
   }
-}, 15 * 60 * 1000); // Run every 15 minutes
+}, 900000);
 
-// ============================================
-// ERROR HANDLING
-// ============================================
-
-app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  
-  if (err instanceof multer.MulterError) {
-    if (err.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ error: 'File too large. Maximum size is 500MB.' });
-    }
-    return res.status(400).json({ error: err.message });
-  }
-  
-  res.status(500).json({ error: err.message || 'Internal server error' });
-});
-
-// ============================================
-// START SERVER
-// ============================================
-
-app.listen(PORT, () => {
-  console.log('='.repeat(50));
-  console.log('🚀 Multi-Version Video Converter API');
-  console.log('='.repeat(50));
-  console.log(`📡 Server listening on port ${PORT}`);
-  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📁 Upload directory: ${path.resolve('uploads')}`);
-  console.log(`📁 Output directory: ${path.resolve('processed/videos')}`);
-  console.log('='.repeat(50));
-  console.log('✅ Ready to process videos!');
-  console.log('');
-});
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
