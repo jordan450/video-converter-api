@@ -510,17 +510,26 @@ app.post('/api/upload-to-mixpost', async (req, res) => {
 
 // Frontend-compatible Mixpost upload endpoint
 app.post('/api/mixpost/upload', async (req, res) => {
+  console.log('📤 Mixpost upload request received');
+  console.log('   Body:', req.body);
+  
   const { filename, workspaceId } = req.body;
   
   if (!filename || !workspaceId) {
+    console.log('❌ Missing parameters:', { filename, workspaceId });
     return res.status(400).json({ error: 'Missing filename or workspaceId' });
   }
 
   const filePath = path.join('processed', 'videos', filename);
+  console.log('   Looking for file:', filePath);
   
   if (!fs.existsSync(filePath)) {
+    console.log('❌ File not found:', filePath);
+    console.log('   Files in processed/videos:', fs.readdirSync('processed/videos'));
     return res.status(404).json({ error: 'File not found' });
   }
+
+  console.log('✅ File found, uploading to Mixpost...');
 
   try {
     const FormData = require('form-data');
@@ -530,15 +539,25 @@ app.post('/api/mixpost/upload', async (req, res) => {
     formData.append('file', fs.createReadStream(filePath));
     formData.append('name', path.parse(filename).name);
 
-    // Mixpost API endpoint - adjust based on your Mixpost setup
-    const mixpostUrl = `https://autoposter.typamanagement.com/api/workspaces/${workspaceId}/media`;
+    // Mixpost API endpoint with authentication
+    const mixpostUrl = `https://autoposter.typamanagement.com/api/v1/workspaces/${workspaceId}/media`;
+    const mixpostToken = 'kuWpPvLYPVdLX7c1qA3MmMFozHugLkO1U7KWl8vs6b4e64e1';
+    
+    console.log('   Uploading to:', mixpostUrl);
     
     const response = await fetch(mixpostUrl, {
       method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${mixpostToken}`,
+        ...formData.getHeaders()
+      },
       body: formData
     });
 
+    console.log('   Mixpost response status:', response.status);
+    
     const data = await response.json();
+    console.log('   Mixpost response data:', data);
 
     if (response.ok) {
       console.log(`✅ Successfully uploaded ${filename} to Mixpost workspace ${workspaceId}`);
@@ -556,7 +575,8 @@ app.post('/api/mixpost/upload', async (req, res) => {
       });
     }
   } catch (error) {
-    console.error('Mixpost upload error:', error);
+    console.error('❌ Mixpost upload error:', error);
+    console.error('   Error stack:', error.stack);
     res.status(500).json({ 
       error: 'Failed to upload to Mixpost', 
       details: error.message 
