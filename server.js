@@ -64,9 +64,6 @@ const upload = multer({
   }
 });
 
-// Support multiple field names for flexibility
-const uploadAny = upload.any();
-
 // ============================================
 // JOB TRACKING
 // ============================================
@@ -303,7 +300,7 @@ app.post('/api/video/upload', upload.single('video'), async (req, res) => {
 });
 
 // Another alternative endpoint - /api/video/process
-app.post('/api/video/process', uploadAny, async (req, res) => {
+app.post('/api/video/process', upload.any(), async (req, res) => {
   console.log('========================================');
   console.log('📥 VIDEO PROCESS REQUEST RECEIVED');
   console.log('========================================');
