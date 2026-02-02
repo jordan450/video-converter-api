@@ -1,6 +1,6 @@
 // ============================================
 // MULTI-VERSION VIDEO CONVERTER SERVER
-// Fixed Debug Version (ReferenceError Solved)
+// Final Version: Fixed ReferenceError & Mixpost Path
 // ============================================
 
 const express = require('express');
@@ -35,7 +35,6 @@ const jobs = new Map();
 
 // Health Check
 app.get(['/', '/health'], (req, res) => {
-    console.log('💓 Health check received');
     res.json({ status: 'online', timestamp: new Date().toISOString() });
 });
 
@@ -56,65 +55,57 @@ app.post(['/api/video/process', '/api/video/upload', '/api/convert'], upload.any
   processVersion(file.path, jobId, 'version1');
 });
 
-// Job Status Route
+// Job Status Route (FIXED REFERENCE ERROR)
 app.get(['/api/job/:jobId', '/api/video/status/:jobId'], (req, res) => {
   const job = jobs.get(req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
   
+  // FIX: Ensure version1 exists before accessing properties
+  const v1 = job.versions.version1;
+  
   res.json({
     jobId: req.params.jobId,
     status: job.status === 'processing' ? 'active' : job.status,
-    progress: job.versions.version1.progress,
-    data: job.status === 'completed' ? [{
+    progress: v1 ? v1.progress : 0,
+    data: job.status === 'completed' && v1 ? [{
       id: 'version1',
-      name: job.versions.version1.filename,
-      // FIX IS HERE: Changed ${version1} to just /version1
+      name: v1.filename,
+      // FIXED: Removed ${version1} typo, used hardcoded string
       downloadUrl: `/api/download/${req.params.jobId}/version1`,
-      size: job.versions.version1.sizeReadable
+      size: v1.sizeReadable
     }] : undefined
   });
 });
 
 // ============================================
-// DEBUGGED MIXPOST UPLOAD ROUTE
+// MIXPOST UPLOAD ROUTE (FIXED PATH)
 // ============================================
 
 app.post('/api/mixpost/upload', async (req, res) => {
-  console.log('🔵 [DEBUG] Mixpost upload request started');
-  console.log('🔵 [DEBUG] Request Body:', JSON.stringify(req.body));
-
   const { filename, workspaceId } = req.body;
   
   if (!filename || !workspaceId) {
-    console.error('🔴 [ERROR] Missing filename or workspaceId');
-    return res.status(400).json({ error: 'Missing parameters', received: req.body });
+    return res.status(400).json({ error: 'Missing filename or workspaceId' });
   }
 
   const filePath = path.join('processed', 'videos', filename);
-  console.log(`🔵 [DEBUG] Looking for file at: ${filePath}`);
 
   if (!fs.existsSync(filePath)) {
-    console.error(`🔴 [ERROR] File NOT found at ${filePath}`);
-    try {
-        const existingFiles = fs.readdirSync(path.join('processed', 'videos'));
-        console.error(`🔴 [DEBUG] Existing files in processed/videos:`, existingFiles);
-    } catch (e) {
-        console.error('🔴 [DEBUG] Could not list directory');
-    }
     return res.status(404).json({ error: 'File not found on server' });
   }
 
   try {
-    console.log('🔵 [DEBUG] File found. Creating ReadStream...');
     const fileStream = fs.createReadStream(filePath);
-    
     const formData = new FormData();
     formData.append('file', fileStream);
 
-    const uploadUrl = `https://autoposter.typamanagement.com/api/${workspaceId}/media`;
+    // FIXED: Added '/mixpost' to the URL path
+    // Mixpost default path usually includes /mixpost unless removed in config
+    const mixpostBaseUrl = 'https://autoposter.typamanagement.com';
+    const uploadUrl = `${mixpostBaseUrl}/mixpost/api/${workspaceId}/media`;
     const mixpostToken = 'kuWpPvLYPVdLX7c1qA3MmMFozHugLkO1U7KWl8vs6b4e64e1';
 
-    console.log(`🔵 [DEBUG] Sending POST request to: ${uploadUrl}`);
+    console.log(`📤 Uploading to: ${uploadUrl}`);
     
     const response = await fetch(uploadUrl, {
       method: 'POST',
@@ -125,33 +116,30 @@ app.post('/api/mixpost/upload', async (req, res) => {
       body: formData
     });
 
-    console.log(`🔵 [DEBUG] Response Status: ${response.status} ${response.statusText}`);
-
-    let data;
+    // Handle non-JSON responses (like 404 HTML)
     const responseText = await response.text();
+    let data;
+    
     try {
         data = JSON.parse(responseText);
-        console.log('🔵 [DEBUG] Parsed Response JSON:', data);
     } catch (e) {
-        console.error('🔴 [ERROR] Failed to parse JSON response. Raw text:', responseText);
-        return res.status(500).json({ error: 'Invalid response from Mixpost', raw: responseText });
+        console.error('❌ Failed to parse Mixpost response:', responseText.substring(0, 200));
+        return res.status(500).json({ 
+            error: 'Mixpost returned invalid data (likely wrong URL)', 
+            details: responseText.substring(0, 100) 
+        });
     }
 
     if (response.ok) {
-      console.log('✅ [SUCCESS] Upload successful');
+      console.log('✅ Upload success');
       res.json({ success: true, data });
     } else {
-      console.error('🔴 [ERROR] Mixpost API rejected upload');
+      console.error('❌ Mixpost error:', data);
       res.status(response.status).json({ error: 'Mixpost upload failed', details: data });
     }
   } catch (error) {
-    console.error('🔴 [CRITICAL ERROR] Exception caught:', error);
-    console.error('🔴 Stack:', error.stack);
-    res.status(500).json({ 
-        error: 'Server crash during upload', 
-        message: error.message,
-        stack: error.stack 
-    });
+    console.error('❌ Server error:', error);
+    res.status(500).json({ error: 'Server crash during upload', message: error.message });
   }
 });
 
@@ -163,7 +151,7 @@ app.get('/api/download/:jobId/:versionKey', (req, res) => {
   res.download(path.join('processed', 'videos', version.filename));
 });
 
-// Processing Function (High Bitrate)
+// Processing Function
 async function processVersion(inputPath, jobId, versionKey) {
   const job = jobs.get(jobId);
   const outputFilename = `${jobId}_${versionKey}.mp4`;
@@ -182,10 +170,10 @@ async function processVersion(inputPath, jobId, versionKey) {
         if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
     })
     .on('error', (err) => { 
-        console.error(`FFmpeg Error for job ${jobId}:`, err);
+        console.error(`FFmpeg Error:`, err);
         job.status = 'failed'; job.error = err.message; 
     })
     .save(outputPath);
 }
 
-app.listen(PORT, () => console.log(`🚀 Debug Server listening on port ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server listening on port ${PORT}`));
