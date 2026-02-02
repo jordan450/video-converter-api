@@ -146,6 +146,14 @@ app.get('/', (req, res) => {
   });
 });
 
+// Health endpoint for monitoring/load balancers
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'online',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // Legacy single conversion endpoint (for backward compatibility)
 app.post('/api/convert', upload.single('video'), async (req, res) => {
   if (!req.file) {
