@@ -304,22 +304,39 @@ app.post('/api/video/upload', upload.single('video'), async (req, res) => {
 
 // Another alternative endpoint - /api/video/process
 app.post('/api/video/process', uploadAny, async (req, res) => {
-  console.log('📥 Received video process request (via /api/video/process)');
-  console.log('   Files:', req.files);
-  console.log('   File (single):', req.file);
-  console.log('   Body:', req.body);
+  console.log('========================================');
+  console.log('📥 VIDEO PROCESS REQUEST RECEIVED');
+  console.log('========================================');
+  console.log('Headers:', JSON.stringify(req.headers, null, 2));
+  console.log('Content-Type:', req.headers['content-type']);
+  console.log('Body:', JSON.stringify(req.body, null, 2));
+  console.log('Files (array):', req.files);
+  console.log('File (single):', req.file);
+  console.log('========================================');
   
   // Get the file from either req.file or req.files
   const uploadedFile = req.file || (req.files && req.files[0]);
   
   if (!uploadedFile) {
-    console.log('❌ No file uploaded');
-    console.log('   req.file:', req.file);
-    console.log('   req.files:', req.files);
-    return res.status(400).json({ error: 'No video file uploaded' });
+    console.log('❌ NO FILE FOUND IN REQUEST');
+    console.log('   req.file is:', req.file);
+    console.log('   req.files is:', req.files);
+    console.log('   req.body is:', req.body);
+    return res.status(400).json({ 
+      error: 'No video file uploaded',
+      debug: {
+        hasFile: !!req.file,
+        hasFiles: !!(req.files && req.files.length),
+        bodyKeys: Object.keys(req.body)
+      }
+    });
   }
 
-  console.log('✅ File received:', uploadedFile.originalname, uploadedFile.size, 'bytes');
+  console.log('✅ FILE RECEIVED:');
+  console.log('   Name:', uploadedFile.originalname);
+  console.log('   Size:', uploadedFile.size, 'bytes');
+  console.log('   Type:', uploadedFile.mimetype);
+  console.log('   Path:', uploadedFile.path);
 
   // Get number of versions from request body (default to 1)
   const versionCount = parseInt(req.body.versionCount) || parseInt(req.body.versions) || 1;
