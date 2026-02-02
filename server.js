@@ -1,6 +1,6 @@
 // ============================================
 // MULTI-VERSION VIDEO CONVERTER SERVER
-// Debug Version for Mixpost Uploads
+// Fixed Debug Version (ReferenceError Solved)
 // ============================================
 
 const express = require('express');
@@ -68,7 +68,8 @@ app.get(['/api/job/:jobId', '/api/video/status/:jobId'], (req, res) => {
     data: job.status === 'completed' ? [{
       id: 'version1',
       name: job.versions.version1.filename,
-      downloadUrl: `/api/download/${req.params.jobId}/${version1}`,
+      // FIX IS HERE: Changed ${version1} to just /version1
+      downloadUrl: `/api/download/${req.params.jobId}/version1`,
       size: job.versions.version1.sizeReadable
     }] : undefined
   });
@@ -94,7 +95,6 @@ app.post('/api/mixpost/upload', async (req, res) => {
 
   if (!fs.existsSync(filePath)) {
     console.error(`🔴 [ERROR] File NOT found at ${filePath}`);
-    // Debug: List files that actually exist to help troubleshoot
     try {
         const existingFiles = fs.readdirSync(path.join('processed', 'videos'));
         console.error(`🔴 [DEBUG] Existing files in processed/videos:`, existingFiles);
@@ -127,7 +127,6 @@ app.post('/api/mixpost/upload', async (req, res) => {
 
     console.log(`🔵 [DEBUG] Response Status: ${response.status} ${response.statusText}`);
 
-    // Try to parse JSON, but handle text responses (like HTML errors) gracefully
     let data;
     const responseText = await response.text();
     try {
