@@ -212,6 +212,35 @@ app.post('/api/video/upload', upload.single('video'), async (req, res) => {
   processMultipleVersions(inputPath, jobId, ['version1']);
 });
 
+// Another alias endpoint for frontend - same as /api/convert
+app.post('/api/video/process', upload.single('video'), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: 'No video file uploaded' });
+  }
+
+  const jobId = `single_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const inputPath = req.file.path;
+  
+  jobs.set(jobId, {
+    status: 'processing',
+    versionCount: 1,
+    versions: {
+      version1: { status: 'pending', progress: 0 }
+    },
+    startTime: Date.now(),
+    originalFilename: req.file.originalname
+  });
+
+  res.json({ 
+    jobId, 
+    message: 'Processing started',
+    versionCount: 1,
+    estimatedTime: '1-2 minutes'
+  });
+
+  processMultipleVersions(inputPath, jobId, ['version1']);
+});
+
 // Multi-version conversion endpoint
 app.post('/api/convert-multi', upload.single('video'), async (req, res) => {
   if (!req.file) {
