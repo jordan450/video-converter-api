@@ -508,6 +508,62 @@ app.post('/api/upload-to-mixpost', async (req, res) => {
   }
 });
 
+// Frontend-compatible Mixpost upload endpoint
+app.post('/api/mixpost/upload', async (req, res) => {
+  const { filename, workspaceId } = req.body;
+  
+  if (!filename || !workspaceId) {
+    return res.status(400).json({ error: 'Missing filename or workspaceId' });
+  }
+
+  const filePath = path.join('processed', 'videos', filename);
+  
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+
+  try {
+    const FormData = require('form-data');
+    const fetch = require('node-fetch');
+    
+    const formData = new FormData();
+    formData.append('file', fs.createReadStream(filePath));
+    formData.append('name', path.parse(filename).name);
+
+    // Mixpost API endpoint - adjust based on your Mixpost setup
+    const mixpostUrl = `https://autoposter.typamanagement.com/api/workspaces/${workspaceId}/media`;
+    
+    const response = await fetch(mixpostUrl, {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      console.log(`✅ Successfully uploaded ${filename} to Mixpost workspace ${workspaceId}`);
+      res.json({ 
+        success: true, 
+        message: 'Uploaded to Mixpost successfully',
+        mediaId: data.id || data.media_id,
+        mixpostResponse: data 
+      });
+    } else {
+      console.error(`❌ Mixpost upload failed:`, data);
+      res.status(response.status).json({ 
+        error: 'Mixpost upload failed', 
+        details: data 
+      });
+    }
+  } catch (error) {
+    console.error('Mixpost upload error:', error);
+    res.status(500).json({ 
+      error: 'Failed to upload to Mixpost', 
+      details: error.message 
+    });
+  }
+});
+
 // ============================================
 // PROCESSING FUNCTIONS
 // ============================================
