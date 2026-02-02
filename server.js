@@ -244,6 +244,61 @@ app.post('/api/convert-multi', upload.single('video'), async (req, res) => {
   processMultipleVersions(inputPath, jobId, versionKeys);
 });
 
+// Alternative endpoint that frontend might be using
+app.post('/api/video/upload', upload.single('video'), async (req, res) => {
+  console.log('📥 Received video upload request (via /api/video/upload)');
+  console.log('   File:', req.file ? req.file.originalname : 'NO FILE');
+  console.log('   Body:', req.body);
+  
+  if (!req.file) {
+    console.log('❌ No file uploaded');
+    return res.status(400).json({ error: 'No video file uploaded' });
+  }
+
+  // Get number of versions from request body (default to 1)
+  const versionCount = parseInt(req.body.versionCount) || parseInt(req.body.versions) || 1;
+  
+  if (versionCount < 1 || versionCount > 5) {
+    return res.status(400).json({ 
+      error: 'Invalid version count. Must be between 1 and 5.' 
+    });
+  }
+
+  const jobId = `multi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  const inputPath = req.file.path;
+  
+  console.log(`✅ Created job ${jobId} for ${versionCount} version(s)`);
+  
+  // Initialize job tracking based on version count
+  const versionsToProcess = {};
+  const versionKeys = Object.keys(VERSION_PRESETS).slice(0, versionCount);
+  
+  versionKeys.forEach(key => {
+    versionsToProcess[key] = { 
+      status: 'pending', 
+      progress: 0 
+    };
+  });
+
+  jobs.set(jobId, {
+    status: 'processing',
+    versionCount,
+    versions: versionsToProcess,
+    startTime: Date.now(),
+    originalFilename: req.file.originalname
+  });
+
+  res.json({ 
+    jobId, 
+    message: `Processing started for ${versionCount} version${versionCount > 1 ? 's' : ''}`,
+    versionCount,
+    estimatedTime: versionCount === 1 ? '1-2 minutes' : `${versionCount}-${versionCount + 2} minutes`
+  });
+
+  // Process selected versions
+  processMultipleVersions(inputPath, jobId, versionKeys);
+});
+
 // Job status endpoint
 app.get('/api/job/:jobId', (req, res) => {
   const job = jobs.get(req.params.jobId);
