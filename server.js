@@ -64,6 +64,9 @@ const upload = multer({
   }
 });
 
+// Support multiple field names for flexibility
+const uploadAny = upload.any();
+
 // ============================================
 // JOB TRACKING
 // ============================================
@@ -300,15 +303,23 @@ app.post('/api/video/upload', upload.single('video'), async (req, res) => {
 });
 
 // Another alternative endpoint - /api/video/process
-app.post('/api/video/process', upload.single('video'), async (req, res) => {
+app.post('/api/video/process', uploadAny, async (req, res) => {
   console.log('📥 Received video process request (via /api/video/process)');
-  console.log('   File:', req.file ? req.file.originalname : 'NO FILE');
+  console.log('   Files:', req.files);
+  console.log('   File (single):', req.file);
   console.log('   Body:', req.body);
   
-  if (!req.file) {
+  // Get the file from either req.file or req.files
+  const uploadedFile = req.file || (req.files && req.files[0]);
+  
+  if (!uploadedFile) {
     console.log('❌ No file uploaded');
+    console.log('   req.file:', req.file);
+    console.log('   req.files:', req.files);
     return res.status(400).json({ error: 'No video file uploaded' });
   }
+
+  console.log('✅ File received:', uploadedFile.originalname, uploadedFile.size, 'bytes');
 
   // Get number of versions from request body (default to 1)
   const versionCount = parseInt(req.body.versionCount) || parseInt(req.body.versions) || 1;
@@ -320,7 +331,7 @@ app.post('/api/video/process', upload.single('video'), async (req, res) => {
   }
 
   const jobId = `multi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-  const inputPath = req.file.path;
+  const inputPath = uploadedFile.path;
   
   console.log(`✅ Created job ${jobId} for ${versionCount} version(s)`);
   
@@ -340,7 +351,7 @@ app.post('/api/video/process', upload.single('video'), async (req, res) => {
     versionCount,
     versions: versionsToProcess,
     startTime: Date.now(),
-    originalFilename: req.file.originalname
+    originalFilename: uploadedFile.originalname
   });
 
   res.json({ 
