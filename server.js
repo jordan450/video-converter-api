@@ -324,6 +324,38 @@ app.get('/api/job/:jobId', (req, res) => {
   });
 });
 
+// Alias for frontend compatibility
+app.get('/api/video/status/:jobId', (req, res) => {
+  const job = jobs.get(req.params.jobId);
+  
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+
+  // Calculate overall progress
+  const versionProgresses = Object.values(job.versions).map(v => v.progress || 0);
+  const overallProgress = Math.floor(
+    versionProgresses.reduce((a, b) => a + b, 0) / versionProgresses.length
+  );
+
+  // Frontend expects 'active' instead of 'processing'
+  const frontendStatus = job.status === 'processing' ? 'active' : job.status;
+
+  // Format response for frontend
+  res.json({
+    jobId: req.params.jobId,
+    status: frontendStatus,
+    progress: overallProgress,
+    data: job.status === 'completed' && job.versions.version1 ? [{
+      id: 'version1',
+      name: job.versions.version1.filename,
+      downloadUrl: `/api/download/${req.params.jobId}/version1`,
+      size: job.versions.version1.sizeReadable
+    }] : undefined,
+    error: job.error
+  });
+});
+
 // Download individual version
 app.get('/api/download/:jobId/:versionKey', (req, res) => {
   const { jobId, versionKey } = req.params;
